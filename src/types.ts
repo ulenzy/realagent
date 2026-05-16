@@ -1,0 +1,181 @@
+export type ROILevel = 'Low' | 'Medium' | 'High' | 'Extreme' | 'Maximised' | 'World-Class' | 'Stable' | 'Mature' | 'Peak' | 'Expanding';
+export type AreaTrend = 'Expanding' | 'Stable' | 'Emerging Hot Zone' | 'Elite Hub' | 'Commercial Surge' | 'Commercial Hotspot' | 'Global Hub' | 'Ultra-Private' | 'Vertical Growth' | 'Commercial transition' | 'New Lagos Hub' | 'Emerging Residential' | 'Established Luxury' | 'Ultra-Elite' | 'Verticalization' | 'Cosmopolitan' | 'Exclusive' | 'Static Elite' | 'Luxury Residential' | 'Elite Resurgence' | 'Industrial Peak' | 'Rapid Development' | 'Established Elite';
+export type PropertyType = 'Land' | 'House';
+
+export type ListingType = 'Sale' | 'Rent';
+
+export interface Agent {
+  id: string;
+  name: string;
+  verified: boolean;
+  avatar?: string;
+  trustScore: number;
+  rating?: number; // 0-6 star rating
+  totalReviews?: number;
+  specialization: string;
+  responseTime: string;
+  propertiesSold: number;
+  bio?: string;
+  linkedin?: string;
+  onlineHours?: string;
+  specializationArea?: string;
+}
+
+export interface EstateIntelligence {
+  infrastructureScore: number;
+  securityRating: number;
+  powerReliability: number;
+  roadAccessibility: number;
+  internetCoverage: number;
+  waterAvailability: number;
+  appreciationTrend: number; // percentage
+  rentalDemand: number; // 1-10
+  livabilityScore: number;
+}
+
+export interface DevelopmentInsight {
+  infrastructureGrowth: ROILevel;
+  areaTrend: AreaTrend;
+  nearbyKeyAdditions: string[];
+  expectedAppreciation: string;
+  aiSummary: string;
+  score: number; // 0-100 Location Development Score
+}
+
+export interface AICard {
+  title: string;
+  description: string;
+  impact: 'Positive' | 'Critical' | 'Stable';
+}
+
+export interface Property {
+  id: string;
+  title: string;
+  type: string; // Changed from PropertyType to string to allow 'Duplex', 'Terrace' etc.
+  listingType: ListingType;
+  price: number;
+  sizeSqm: number;
+  bedrooms: number;
+  bathrooms: number;
+  estateName: string;
+  location: {
+    state: string;
+    city: string;
+    area: string;
+    address?: string;
+    coordinates?: {
+      lat: number;
+      lng: number;
+      };
+    };
+  image: string;
+  gallery: string[];
+  satelliteImage?: string;
+  agent: Agent;
+  roiPotential: ROILevel;
+  developmentInsight: DevelopmentInsight;
+  estateIntelligence: EstateIntelligence;
+  aiInsights: AICard[];
+  amenities: string[];
+  isHotDeal?: boolean;
+  isBoosted?: boolean;
+  isSubscriber?: boolean;
+  expiresAt: string;
+  isDistressDeal?: boolean;
+  furnishing?: 'Unfurnished' | 'Semi-furnished' | 'Fully-furnished';
+  condition?: 'New' | 'Renovated' | 'Old';
+  tags?: string[];
+  createdAt: string;
+  description: string;
+  keyHighlights?: string[];
+  appreciationScore: number;
+  rentalYieldEstimate: number;
+  commission?: number; // percentage
+  acceptsDownPayment?: boolean;
+}
+
+export type ListingStatus = 'Pending' | 'Inspection Scheduled' | 'Under Review' | 'Approved' | 'Rejected' | 'Archived';
+
+export interface ListingRequest {
+  id: string;
+  title: string;
+  type: string;
+  price: number;
+  location: string;
+  status: ListingStatus;
+  submittedAt: string;
+  lastUpdated: string;
+  expiresAt: string;
+  isBoosted?: boolean;
+  isSubscriber?: boolean;
+  commission?: number;
+  acceptsDownPayment?: boolean;
+  documents?: { name: string; fileType: string; fileName: string }[];
+  metrics?: {
+    views: number;
+    saves: number;
+    inquiries: number;
+  };
+}
+
+export interface Message {
+  id: string;
+  senderId: string;
+  receiverId: string;
+  text: string;
+  timestamp: string;
+  propertyId?: string;
+}
+
+export interface ChatSession {
+  id: string;
+  participant: {
+    id: string;
+    name: string;
+    avatar?: string;
+  };
+  propertyId: string;
+  propertyName: string;
+  lastMessage?: string;
+  lastTimestamp?: string;
+  unreadCount?: number;
+}
+
+export interface Transaction {
+  id: string;
+  type: 'Credit' | 'Debit';
+  amount: number;
+  description: string;
+  timestamp: string;
+}
+
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  phoneNumber?: string;
+  bio?: string;
+  avatarSeed?: string;
+  savedProperties: string[];
+  isAgent: boolean;
+  isSubscriber: boolean;
+  kycStatus: 'None' | 'Pending' | 'Verified';
+  kycDocuments: string[];
+  profileScore: number;
+  rating?: number; // 0-6 star rating
+  totalReviews?: number;
+  tokens: number;
+  transactions?: Transaction[];
+  role?: 'Buyer' | 'Agent' | 'Developer';
+  preferredLocations?: string[];
+  gender?: 'Male' | 'Female' | 'Other' | 'Prefer not to say';
+  linkedin?: string;
+  onlineHours?: string;
+  specializationArea?: string;
+  avatarRolls?: {
+    regular: number;
+    epic: number;
+    legendary: number;
+    lastSubscriptionDate?: string;
+  };
+}

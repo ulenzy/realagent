@@ -1,0 +1,15 @@
+{
+  "name": "Remix: RealAgents",
+  "description": "High-performance Nigerian land marketplace with AI-powered infrastructure intelligence and investment analysis.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "AI-powered property search",
+    "Infrastructure \u0026 Development Intelligence",
+    "Agent verification system",
+    "Investment ROI analysis"
+  ]
+}

@@ -1,0 +1,1668 @@
+import React, { useState } from 'react';
+import { 
+  User, Settings, Heart, History, HelpCircle, 
+  ChevronRight, ShieldCheck, LogOut, PlusCircle,
+  Briefcase, Bell, Zap, X, MapPin, ArrowLeft,
+  Eye, BarChart3, Edit3, Power, MessageSquare, Save, Star
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { cn } from '../lib/utils';
+import { ListingRequest, ListingStatus, User as UserType } from '../types';
+import { mockProperties } from '../data/mockListings';
+import { PropertyCard } from './Marketplace';
+import { formatCurrency, parseFormattedNumber, formatNumberString } from '../lib/utils';
+import { Clock, CheckCircle, AlertTriangle, Calendar, Award, Camera, FileText, Phone, Mail } from 'lucide-react';
+
+export default function Profile({ 
+  user,
+  onUpdateUser,
+  onSelectProperty, 
+  savedProperties = [], 
+  onToggleSave, 
+  onViewAgentProfile,
+  viewedProperties = [],
+  listingRequests = [],
+  onUpdateUser: _onUpdateUser, // To avoid shadowing
+  onUpdateListingRequest
+}: { 
+  user: UserType,
+  onUpdateUser: (updates: Partial<UserType>) => void,
+  onSelectProperty?: (id: string) => void, 
+  savedProperties?: string[], 
+  onToggleSave?: (id: string) => void, 
+  onViewAgentProfile?: (id: string) => void,
+  viewedProperties?: string[],
+  listingRequests?: ListingRequest[],
+  onUpdateListingRequest?: (id: string, updates: Partial<ListingRequest>) => void
+}) {
+  const [activeModal, setActiveModal] = useState<string | null>(null);
+  const [activeView, setActiveView] = useState<'main' | 'Saved Properties' | 'Viewed History' | 'Price Alerts' | 'My Listings' | 'Trust Score Details' | 'Customize Profile' | 'Wallet'>('main');
+  
+  const LISTING_LIMIT_FREE = 2;
+  const LISTING_LIMIT_PRO = 6;
+  const ADDITIONAL_LISTING_COST = 10;
+  const BOOST_COST = 20;
+  const MAX_PRO_BOOSTS = 3;
+
+  const handleSpendTokens = (amount: number, description: string) => {
+    if (user.tokens >= amount) {
+      const newTransaction = {
+        id: `tx-${Date.now()}`,
+        type: 'Debit' as const,
+        amount,
+        description,
+        timestamp: new Date().toISOString()
+      };
+      onUpdateUser({
+        tokens: user.tokens - amount,
+        transactions: [newTransaction, ...(user.transactions || [])]
+      });
+      return true;
+    }
+    setActiveModal('Insufficient Tokens');
+    return false;
+  };
+
+  const handleBuyTokens = (amount: number, tokens: number) => {
+    const newTransaction = {
+      id: `tx-${Date.now()}`,
+      type: 'Credit' as const,
+      amount: tokens,
+      description: `Purchased ${tokens} tokens`,
+      timestamp: new Date().toISOString()
+    };
+    onUpdateUser({
+      tokens: user.tokens + tokens,
+      transactions: [newTransaction, ...(user.transactions || [])]
+    });
+  };
+  const [editingListing, setEditingListing] = useState<string | null>(null);
+  const [editFormData, setEditFormData] = useState<{title: string, price: string}>({title: '', price: ''});
+  const [viewingMetrics, setViewingMetrics] = useState<string | null>(null);
+
+  // Profile Edit State
+  const [profileEditData, setProfileEditData] = useState({
+    name: user.name,
+    bio: user.bio || '',
+    phoneNumber: user.phoneNumber || '',
+    avatarSeed: user.avatarSeed || 'User',
+    role: user.role || 'Buyer',
+    linkedin: user.linkedin || '',
+    onlineHours: user.onlineHours || 'Mon,Tue,Wed,Thu,Fri|09:00-17:00',
+    specializationArea: user.specializationArea || '',
+    preferredLocations: user.preferredLocations || [],
+    gender: user.gender || 'Prefer not to say',
+    avatarOptions: {
+      hairStyle: 'shortHair',
+      hairColor: 'black',
+      headwear: 'none'
+    }
+  });
+
+  const [avatarPreview, setAvatarPreview] = useState(user.avatarSeed || 'User');
+  const [rollsUsed, setRollsUsed] = useState(0);
+  const [locationInput, setLocationInput] = useState('');
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+
+  // KYC State
+  const [isPreviewing, setIsPreviewing] = useState(false);
+  const [kycStage, setKycStage] = useState<1 | 2 | 3>(1);
+  const [livenessStep, setLivenessStep] = useState<0 | 1 | 2 | 3>(0); // 0: Not started, 1: Open Mouth, 2: Blink, 3: Success
+  const [kycFiles, setKycFiles] = useState<string[]>([]);
+  const [uploadedKycFiles, setUploadedKycFiles] = useState<Record<string, string>>({});
+  const [isSubmittingKYC, setIsSubmittingKYC] = useState(false);
+
+  const handleKycFileUpload = (docId: string, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setUploadedKycFiles(prev => ({
+        ...prev,
+        [docId]: file.name
+      }));
+    }
+  };
+
+  const isSubscriber = user.isSubscriber;
+
+  const handleAction = (action: string) => {
+    if (action === 'Request Listing') {
+      const currentLimit = isSubscriber ? LISTING_LIMIT_PRO : LISTING_LIMIT_FREE;
+      const isAboveLimit = (listingRequests?.length || 0) >= currentLimit;
+      
+      if (isAboveLimit) {
+        setActiveModal('Additional Listing Cost');
+      } else {
+        window.dispatchEvent(new CustomEvent('open-listing-flow'));
+      }
+      return;
+    }
+    if (action === 'Complete KYC') {
+      setActiveModal('Complete KYC');
+      return;
+    }
+    if (action === 'Wallet') {
+      setActiveView('Wallet');
+      return;
+    }
+    if (['Saved Properties', 'Viewed History', 'Price Alerts', 'My Listings', 'Customize Profile', 'Wallet'].includes(action)) {
+      setActiveView(action as any);
+    } else {
+      setActiveModal(action);
+    }
+  };
+
+  const renderStars = (rating: number = 0) => {
+    return (
+      <div className="flex gap-1">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <Star 
+            key={i} 
+            size={14} 
+            className={cn(
+              "transition-all",
+              i < Math.round(rating) ? "fill-brand-teal text-brand-teal" : "text-zinc-700"
+            )} 
+          />
+        ))}
+        <span className="text-[10px] font-black text-brand-teal ml-1">({user.totalReviews || 0})</span>
+      </div>
+    );
+  };
+
+  if (isPreviewing) {
+    return (
+      <div className="relative">
+        <div className="sticky top-0 bg-white dark:bg-zinc-900 border-b-4 border-brand-black dark:border-zinc-700 p-4 flex items-center gap-4 z-[60] shadow-brutal-sm">
+          <button onClick={() => setIsPreviewing(false)} className="p-2 border-2 border-brand-black dark:border-zinc-700 hover:bg-brand-teal transition-colors text-brand-black dark:text-brand-gray">
+            <ArrowLeft size={20} />
+          </button>
+          <h1 className="text-xl font-display font-black uppercase tracking-tight text-brand-black dark:text-brand-gray">Public Profile Preview</h1>
+        </div>
+        <div className="bg-zinc-50 dark:bg-brand-black min-h-screen">
+           <div className="p-4 border-b-2 border-dashed border-zinc-300 dark:border-zinc-800 text-center">
+             <p className="text-[10px] font-black uppercase text-zinc-500 italic">This is how other users see your profile</p>
+           </div>
+           
+           {/* Reusing some visual logic from AgentProfile but for the current user */}
+           <div className="max-w-4xl mx-auto px-4 py-8">
+             <div className="bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 p-6 shadow-aggressive">
+               <div className="flex gap-6 items-start mb-8">
+                 <div className="w-32 h-32 bg-brand-teal border-4 border-brand-black overflow-hidden shadow-brutal">
+                   <img 
+                     src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.avatarSeed || user.name}&gender=${user.gender === 'Female' ? 'female' : 'male'}`} 
+                     alt="Preview" 
+                     className="w-full h-full"
+                   />
+                 </div>
+                 <div className="flex-1">
+                   <div className="flex items-center gap-2 mb-1">
+                     <h2 className="text-3xl font-display font-black uppercase italic tracking-tighter">{user.name}</h2>
+                     {user.kycStatus === 'Verified' && <ShieldCheck className="text-brand-teal" size={20} />}
+                   </div>
+                   <p className="text-sm font-bold text-zinc-500 uppercase tracking-widest mb-3">{user.role || 'Property Enthusiast'}</p>
+                   <div className="mb-4">
+                     {renderStars(user.rating || 4.5)}
+                   </div>
+                   <p className="text-xs font-medium text-zinc-600 dark:text-zinc-400 leading-relaxed mb-4">
+                     {user.bio || "This user hasn't added a bio yet."}
+                   </p>
+                   
+                   <div className="grid grid-cols-2 gap-3 max-w-sm">
+                      <div className="bg-brand-gray border-2 border-brand-black p-2">
+                        <p className="text-[8px] font-black uppercase text-zinc-500">Trust Score</p>
+                        <p className="text-base font-black text-brand-teal">{user.profileScore}%</p>
+                      </div>
+                      <div className="bg-brand-gray border-2 border-brand-black p-2">
+                        <p className="text-[8px] font-black uppercase text-zinc-500">Member Since</p>
+                        <p className="text-base font-black">May 2026</p>
+                      </div>
+                   </div>
+                 </div>
+               </div>
+               
+               {user.preferredLocations && user.preferredLocations.length > 0 && (
+                 <div className="pt-6 border-t-2 border-zinc-100 dark:border-zinc-800">
+                    <h3 className="text-[10px] font-black uppercase text-zinc-500 mb-2">Operational Focus</h3>
+                    <div className="flex flex-wrap gap-2">
+                      {user.preferredLocations.map(loc => (
+                        <span key={loc} className="px-2 py-1 bg-brand-teal text-brand-black font-black uppercase text-[10px] border-2 border-brand-black">
+                          {loc}
+                        </span>
+                      ))}
+                    </div>
+                 </div>
+               )}
+             </div>
+           </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (activeView !== 'main') {
+    return (
+      <div className="flex flex-col bg-brand-gray dark:bg-[#1c1c21] min-h-screen pb-32">
+        <div className="sticky top-0 bg-white dark:bg-zinc-900 border-b-4 border-brand-black dark:border-zinc-700 p-4 flex items-center gap-4 z-10 shadow-brutal-sm dark:shadow-[2px_2px_0px_0px_#52525b]">
+          <button onClick={() => setActiveView('main')} className="p-2 border-2 border-brand-black dark:border-zinc-700 hover:bg-brand-teal transition-colors text-brand-black dark:text-brand-gray">
+            <ArrowLeft size={20} />
+          </button>
+          <h1 className="text-xl font-display font-black uppercase tracking-tight text-brand-black dark:text-brand-gray">{activeView}</h1>
+        </div>
+        
+        <div className="p-4 flex flex-col gap-4">
+          {activeView === 'Wallet' && (
+            <div className="flex flex-col gap-6">
+              <div className="bg-brand-black text-white p-6 border-4 border-brand-teal shadow-aggressive relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-4 opacity-10">
+                  <Zap size={100} className="text-brand-teal fill-brand-teal" />
+                </div>
+                <h3 className="text-2xl font-display font-black italic uppercase text-brand-teal mb-1">Agent Wallet</h3>
+                <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-6">Real-Time Token Balance</p>
+                
+                <div className="flex items-end gap-3 mb-8">
+                  <span className="text-5xl font-display font-black tracking-tighter text-white">{user.tokens || 0}</span>
+                  <span className="text-brand-teal font-black uppercase text-sm mb-2 italic">Tokens</span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <button 
+                    onClick={() => handleBuyTokens(10, 100)}
+                    className="bg-brand-teal text-brand-black p-4 border-2 border-brand-black shadow-brutal-sm hover:translate-y-1 hover:shadow-none transition-all text-center"
+                  >
+                    <p className="text-[10px] font-black uppercase opacity-60">Starter Pack</p>
+                    <p className="text-lg font-black italic">100 TKNS</p>
+                    <p className="text-[10px] font-bold">₦5,000</p>
+                  </button>
+                  <button 
+                    onClick={() => handleBuyTokens(40, 500)}
+                    className="bg-amber-400 text-brand-black p-4 border-2 border-brand-black shadow-brutal-sm hover:translate-y-1 hover:shadow-none transition-all text-center"
+                  >
+                    <p className="text-[10px] font-black uppercase opacity-60">Pro Pack</p>
+                    <p className="text-lg font-black italic">500 TKNS</p>
+                    <p className="text-[10px] font-bold">₦20,000</p>
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 p-4 shadow-brutal-sm">
+                <h4 className="text-[10px] font-black uppercase text-zinc-400 tracking-[0.2em] mb-4">Transaction Logs</h4>
+                <div className="space-y-3">
+                  {user.transactions && user.transactions.length > 0 ? (
+                    user.transactions.map(tx => (
+                      <div key={tx.id} className="flex justify-between items-center py-2 border-b-2 border-dashed border-zinc-100 dark:border-zinc-800">
+                        <div>
+                          <p className="text-[10px] font-black uppercase">{tx.description}</p>
+                          <p className="text-[8px] font-bold text-zinc-500">{new Date(tx.timestamp).toLocaleDateString()}</p>
+                        </div>
+                        <span className={cn(
+                          "font-display font-black",
+                          tx.type === 'Credit' ? "text-emerald-500" : "text-brand-red"
+                        )}>
+                          {tx.type === 'Credit' ? '+' : '-'}{tx.amount}
+                        </span>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-[10px] font-black uppercase text-zinc-500 py-4 text-center italic">No transaction history detected</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeView === 'My Listings' && (
+            <>
+              {listingRequests.length === 0 ? (
+                <div className="py-20 flex flex-col items-center gap-4 text-center">
+                  <div className="w-20 h-20 bg-brand-gray border-4 border-brand-black flex items-center justify-center rounded-full">
+                    <PlusCircle size={40} className="text-zinc-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-display font-black uppercase">No Listings Yet</h3>
+                    <p className="text-zinc-500 font-bold max-w-xs uppercase text-xs">Submit a property listing request to track it here.</p>
+                  </div>
+                  <button 
+                    onClick={() => window.dispatchEvent(new CustomEvent('open-listing-flow'))}
+                    className="brutalist-button-teal mt-4 px-8"
+                  >
+                    Host a Listing
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-4">
+                  <div className="bg-brand-black text-white p-3 border-b-4 border-brand-teal mb-2 flex justify-between items-center">
+                    <h2 className="text-[10px] font-black uppercase tracking-[0.2em]">Listing Pipeline Status</h2>
+                    <span className="text-[8px] font-black uppercase opacity-60">
+                      {isSubscriber ? 'Auto-Renewal Enabled' : 'Manual Renewal Required (30 Days)'}
+                    </span>
+                  </div>
+                  {listingRequests.map(req => {
+                    const daysLeft = Math.ceil((new Date(req.expiresAt || '').getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+                    const isExpired = daysLeft <= 0;
+                    const isEditing = editingListing === req.id;
+                    const isViewingMetrics = viewingMetrics === req.id;
+                    
+                    return (
+                      <div key={req.id} className={cn(
+                        "bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 p-4 shadow-brutal-sm relative overflow-hidden transition-all duration-300",
+                        (isExpired || req.status === 'Archived') && "opacity-75 grayscale"
+                      )}>
+                        {/* Metrics Overlay */}
+                        <AnimatePresence>
+                          {isViewingMetrics && (
+                            <motion.div 
+                              initial={{ opacity: 0, scale: 0.95 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              exit={{ opacity: 0, scale: 0.95 }}
+                              className="absolute inset-0 z-20 bg-brand-black text-white p-4 flex flex-col justify-center gap-6"
+                            >
+                              <button 
+                                onClick={() => setViewingMetrics(null)}
+                                className="absolute top-2 right-2 text-zinc-400 hover:text-white"
+                              >
+                                <X size={20} />
+                              </button>
+                              <div className="text-center">
+                                <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-brand-teal mb-4">Real-Time Performance</h4>
+                                <div className="grid grid-cols-3 gap-2">
+                                  <div className="flex flex-col items-center p-3 border-2 border-zinc-800 bg-zinc-900">
+                                    <Eye size={16} className="text-zinc-500 mb-1" />
+                                    <span className="text-lg font-display font-black">{req.metrics?.views || 0}</span>
+                                    <span className="text-[8px] font-black uppercase opacity-60">Views</span>
+                                  </div>
+                                  <div className="flex flex-col items-center p-3 border-2 border-zinc-800 bg-zinc-900">
+                                    <Save size={16} className="text-zinc-500 mb-1" />
+                                    <span className="text-lg font-display font-black">{req.metrics?.saves || 0}</span>
+                                    <span className="text-[8px] font-black uppercase opacity-60">Saves</span>
+                                  </div>
+                                  <div className={cn(
+                                    "flex flex-col items-center p-3 border-2 border-zinc-800 bg-zinc-900 relative overflow-hidden transition-all",
+                                    !isSubscriber && "grayscale opacity-50"
+                                  )}>
+                                    <MessageSquare size={16} className="text-zinc-500 mb-1" />
+                                    <span className="text-lg font-display font-black">
+                                      {isSubscriber ? (req.metrics?.inquiries || 0) : '—'}
+                                    </span>
+                                    <span className="text-[8px] font-black uppercase opacity-60">Leads</span>
+                                    {!isSubscriber && (
+                                      <div className="absolute inset-0 flex items-center justify-center bg-black/40 group-hover:bg-black/60 transition-all cursor-help" title="Pro Feature">
+                                        <Zap size={14} className="text-amber-400 fill-amber-400" />
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+
+                        <div className="flex justify-between items-start mb-3">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-[8px] font-black uppercase tracking-widest bg-brand-teal/20 text-brand-teal px-1.5 py-0.5 border border-brand-teal/30">{req.type}</span>
+                              {req.isBoosted && <span className="text-[8px] font-black uppercase tracking-widest bg-amber-400 text-black px-1.5 py-0.5 border border-black italic">Boosted</span>}
+                              <span className="text-[8px] font-black uppercase tracking-widest text-zinc-400">Ref: {req.id.slice(0, 8)}</span>
+                            </div>
+                            {isEditing ? (
+                              <div className="space-y-2">
+                                <input 
+                                  className="w-full bg-zinc-100 dark:bg-zinc-800 border-2 border-brand-black p-1 font-display font-black uppercase text-lg"
+                                  value={editFormData.title}
+                                  onChange={e => setEditFormData({...editFormData, title: e.target.value})}
+                                  autoFocus
+                                />
+                                <p className="text-[8px] text-brand-teal font-black uppercase tracking-widest bg-brand-teal/5 p-1 border border-brand-teal/20 italic inline-block">
+                                  * Verification takes up to 24hrs
+                                </p>
+                              </div>
+                            ) : (
+                              <div className="flex flex-col gap-1">
+                                <h3 className="font-display font-black uppercase text-lg leading-tight dark:text-brand-gray">{req.title}</h3>
+                                {(req.commission !== undefined || (req.documents && req.documents.length > 0)) && (
+                                  <div className="flex gap-2">
+                                    {req.commission !== undefined && (
+                                      <span className="text-[8px] font-black uppercase bg-brand-black text-brand-teal px-1 border border-brand-teal">
+                                        Comm: {req.commission}%
+                                      </span>
+                                    )}
+                                    {req.documents && req.documents.length > 0 && (
+                                      <span className="text-[8px] font-black uppercase bg-brand-teal text-brand-black px-1 border border-brand-black">
+                                        {req.documents.length} Docs Attached
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            <p className="text-[10px] font-bold text-zinc-500 flex items-center gap-1 mt-1">
+                              <MapPin size={10} className="text-brand-teal" />
+                              {req.location}
+                            </p>
+                          </div>
+                          <div className="flex flex-col items-end gap-2 ml-4">
+                             <StatusBadge status={req.status} />
+                             <div className={cn(
+                               "text-[9px] font-black uppercase tracking-widest flex items-center gap-1 px-2 py-1 border-2",
+                               isExpired || req.status === 'Archived' ? "bg-brand-red text-white border-brand-black" : (daysLeft < 5 ? "bg-amber-400 text-black border-black" : "bg-black text-white border-black")
+                             )}>
+                               <Clock size={10} /> {isExpired || req.status === 'Archived' ? "EXPIRED" : `${daysLeft}D LEFT`}
+                             </div>
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-center justify-between pt-4 border-t-2 border-zinc-100 dark:border-zinc-800 mt-2">
+                          <div className="flex-1">
+                            <p className="text-[8px] font-black uppercase text-zinc-400 tracking-widest leading-none mb-1">Listing Valuation</p>
+                            {isEditing ? (
+                              <input 
+                                className="w-32 bg-zinc-100 dark:bg-zinc-800 border-2 border-brand-black p-1 font-display font-black text-lg"
+                                value={editFormData.price}
+                                onChange={e => setEditFormData({...editFormData, price: formatNumberString(e.target.value)})}
+                              />
+                            ) : (
+                              <p className="text-lg font-display font-black text-brand-black dark:text-brand-teal leading-none">{formatCurrency(req.price)}</p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {isEditing ? (
+                              <>
+                                <button 
+                                  onClick={() => {
+                                    onUpdateListingRequest?.(req.id, { 
+                                      title: editFormData.title, 
+                                      price: Number(parseFormattedNumber(editFormData.price)) 
+                                    });
+                                    setEditingListing(null);
+                                  }}
+                                  className="bg-brand-black text-brand-teal border-2 border-brand-black p-2 hover:bg-zinc-800 transition-all"
+                                >
+                                  <Save size={16} />
+                                </button>
+                                <button 
+                                  onClick={() => setEditingListing(null)}
+                                  className="bg-white text-zinc-400 border-2 border-zinc-200 p-2 hover:bg-zinc-50 transition-all"
+                                >
+                                  <X size={16} />
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button 
+                                  onClick={() => {
+                                    setEditingListing(req.id);
+                                    setEditFormData({ title: req.title, price: formatNumberString(req.price.toString()) });
+                                  }}
+                                  className="p-2 border-2 border-zinc-200 text-zinc-400 hover:border-brand-black hover:text-brand-black dark:border-zinc-800 transition-all"
+                                  title="Edit Listing"
+                                >
+                                  <Edit3 size={16} />
+                                </button>
+                                <button 
+                                  onClick={() => setViewingMetrics(req.id)}
+                                  className="p-2 border-2 border-zinc-200 text-zinc-400 hover:border-brand-black hover:text-brand-black dark:border-zinc-800 transition-all"
+                                  title="Performance Metrics"
+                                >
+                                  <BarChart3 size={16} />
+                                </button>
+                                <button 
+                                  onClick={() => {
+                                    const nextStatus: ListingStatus = req.status === 'Archived' ? 'Pending' : 'Archived';
+                                    onUpdateListingRequest?.(req.id, { status: nextStatus });
+                                  }}
+                                  className={cn(
+                                    "p-2 border-2 transition-all",
+                                    req.status === 'Archived' 
+                                      ? "border-emerald-500 text-emerald-500 hover:bg-emerald-50" 
+                                      : "border-brand-red text-brand-red hover:bg-brand-red/5"
+                                  )}
+                                  title={req.status === 'Archived' ? "Activate Listing" : "Deactivate Listing"}
+                                >
+                                  <Power size={16} />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        {req.status !== 'Archived' && (
+                          <div className="flex gap-2 mt-4 pt-4 border-t-2 border-zinc-100 dark:border-zinc-800 border-dashed">
+                            <button className="flex-1 bg-brand-teal text-brand-black border-2 border-brand-black px-3 py-1.5 text-[10px] font-black uppercase hover:bg-brand-black hover:text-brand-teal transition-all">
+                              {isExpired ? "Renew Free" : "Extend (₦3,700)"}
+                            </button>
+                                 <button 
+                                  onClick={() => {
+                                    if (req.isBoosted) {
+                                       onUpdateListingRequest?.(req.id, { isBoosted: false });
+                                    } else {
+                                      // Check boost limit if Pro
+                                      const boostedCount = listingRequests.filter(r => r.isBoosted).length;
+                                      if (isSubscriber && boostedCount >= MAX_PRO_BOOSTS) {
+                                        setActiveModal('Boost Limit Reached');
+                                        return;
+                                      }
+                                      
+                                      if (handleSpendTokens(BOOST_COST, `Boosted Listing: ${req.title}`)) {
+                                        onUpdateListingRequest?.(req.id, { isBoosted: true });
+                                      }
+                                    }
+                                  }}
+                                  className={cn(
+                                    "flex-1 border-2 px-3 py-1.5 text-[10px] font-black uppercase transition-all",
+                                    req.isBoosted 
+                                      ? "bg-brand-black text-amber-400 border-brand-black" 
+                                      : "bg-amber-400 text-brand-black border-brand-black hover:bg-black hover:text-amber-400"
+                                  )}
+                                >
+                                  {req.isBoosted ? "Boost Active" : "Boost Listing (20 TKNS)"}
+                                </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+          {activeView === 'Saved Properties' && (
+            <>
+              {savedProperties.length === 0 ? (
+                <div className="py-20 flex flex-col items-center gap-4 text-center">
+                  <div className="w-20 h-20 bg-brand-gray border-4 border-brand-black flex items-center justify-center rounded-full">
+                    <Heart size={40} className="text-zinc-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-display font-black uppercase">No Saved Intel</h3>
+                    <p className="text-zinc-500 font-bold max-w-xs uppercase text-xs">You haven't saved any property listings yet.</p>
+                  </div>
+                </div>
+              ) : (
+                mockProperties.filter(p => savedProperties.includes(p.id)).map(prop => (
+                  <PropertyCard 
+                    key={prop.id} 
+                    property={prop} 
+                    onViewDetails={() => onSelectProperty?.(prop.id)} 
+                    onViewAgentProfile={() => onViewAgentProfile?.(prop.agent.id)}
+                    isSaved={true}
+                    onToggleSave={onToggleSave}
+                  />
+                ))
+              )}
+            </>
+          )}
+          {activeView === 'Viewed History' && (
+            <>
+              {viewedProperties.length === 0 ? (
+                <div className="py-20 flex flex-col items-center gap-4 text-center">
+                  <div className="w-20 h-20 bg-brand-gray border-4 border-brand-black flex items-center justify-center rounded-full">
+                    <History size={40} className="text-zinc-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-display font-black uppercase">No Recent Activity</h3>
+                    <p className="text-zinc-500 font-bold max-w-xs uppercase text-xs">You haven't viewed any properties yet.</p>
+                  </div>
+                </div>
+              ) : (
+                viewedProperties.map(id => {
+                  const prop = mockProperties.find(p => p.id === id);
+                  if (!prop) return null;
+                  return (
+                    <PropertyCard 
+                      key={prop.id} 
+                      property={prop} 
+                      onViewDetails={() => onSelectProperty?.(prop.id)} 
+                      onViewAgentProfile={() => onViewAgentProfile?.(prop.agent.id)}
+                      isSaved={savedProperties.includes(prop.id)}
+                      onToggleSave={onToggleSave}
+                    />
+                  );
+                })
+              )}
+            </>
+          )}
+          {activeView === 'Customize Profile' && (
+            <div className="flex flex-col gap-6">
+              <div className="bg-brand-black text-white p-6 border-4 border-brand-teal shadow-aggressive">
+                <h3 className="text-2xl font-display font-black italic uppercase text-brand-teal mb-1">Advanced Customization</h3>
+                <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-6">Build your professional presence</p>
+                
+                <div className="space-y-6">
+                  {/* Basic Profile Details */}
+                  <div className="bg-zinc-900 border-2 border-zinc-800 p-4 space-y-4">
+                    <h4 className="text-[10px] font-black uppercase text-brand-teal tracking-widest">Basic Profile</h4>
+                    <div className="space-y-4">
+                      <div className="group">
+                        <label className="text-[10px] font-black uppercase text-zinc-400 tracking-[0.2em] mb-1 block">Full Display Name</label>
+                        <input 
+                          type="text" 
+                          value={profileEditData.name}
+                          onChange={e => setProfileEditData({...profileEditData, name: e.target.value})}
+                          className="brutalist-input h-10 text-xs bg-zinc-800 border-zinc-700 text-white w-full placeholder:text-zinc-600"
+                          placeholder="e.g. John Doe"
+                        />
+                      </div>
+                      <div className="group">
+                        <label className="text-[10px] font-black uppercase text-zinc-400 tracking-[0.2em] mb-1 block">Phone Number</label>
+                        <input 
+                          type="text" 
+                          value={profileEditData.phoneNumber}
+                          onChange={e => setProfileEditData({...profileEditData, phoneNumber: e.target.value})}
+                          className="brutalist-input h-10 text-xs bg-zinc-800 border-zinc-700 text-white w-full placeholder:text-zinc-600"
+                          placeholder="+234 ..."
+                        />
+                      </div>
+                      <div className="group">
+                        <label className="text-[10px] font-black uppercase text-zinc-400 tracking-[0.2em] mb-1 block">Professional Bio</label>
+                        <textarea 
+                          value={profileEditData.bio}
+                          onChange={e => setProfileEditData({...profileEditData, bio: e.target.value})}
+                          className="brutalist-input min-h-[80px] py-3 text-xs bg-zinc-800 border-zinc-700 text-white leading-relaxed resize-none w-full placeholder:text-zinc-600"
+                          placeholder="Tell us about yourself..."
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="group">
+                          <label className="text-[10px] font-black uppercase text-zinc-400 tracking-[0.2em] mb-1 block">Account Role</label>
+                          <select 
+                            value={profileEditData.role}
+                            onChange={e => setProfileEditData({...profileEditData, role: e.target.value as any})}
+                            className="brutalist-input h-10 text-xs bg-zinc-800 border-zinc-700 text-white w-full"
+                          >
+                            <option value="Buyer">Property Buyer / Investor</option>
+                            <option value="Agent">Real Estate Agent</option>
+                            <option value="Developer">Property Developer</option>
+                          </select>
+                        </div>
+                        <div className="group">
+                          <label className="text-[10px] font-black uppercase text-zinc-400 tracking-[0.2em] mb-1 block">Gender Identity</label>
+                          <select 
+                            value={profileEditData.gender}
+                            onChange={e => setProfileEditData({...profileEditData, gender: e.target.value as any})}
+                            className="brutalist-input h-10 text-xs bg-zinc-800 border-zinc-700 text-white w-full"
+                          >
+                            <option value="Male">Male</option>
+                            <option value="Female">Female</option>
+                            <option value="Other">Other</option>
+                            <option value="Prefer not to say">Prefer not to say</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Avatar Customization */}
+                  <div className="bg-zinc-900 border-2 border-zinc-800 p-4 space-y-4">
+                    <h4 className="text-[10px] font-black uppercase text-brand-teal tracking-widest">Digital Identity Designer</h4>
+                    <div className="flex gap-6 items-start">
+                      <div className="flex flex-col items-center gap-3">
+                        <div className="w-24 h-24 bg-brand-teal border-4 border-brand-black overflow-hidden shadow-brutal-sm">
+                          <img 
+                            src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${avatarPreview}&gender=${profileEditData.gender === 'Female' ? 'female' : 'male'}`} 
+                            alt="Preview" 
+                            className="w-full h-full"
+                          />
+                        </div>
+                        <div className="text-center">
+                           <p className="text-[8px] font-black uppercase text-zinc-500 mb-1">Rolls: {rollsUsed}/{isSubscriber ? '∞' : '1'}</p>
+                           <button 
+                             disabled={!isSubscriber && rollsUsed >= 1}
+                             onClick={() => {
+                               setAvatarPreview(Math.random().toString(36).substring(7));
+                               setRollsUsed(prev => prev + 1);
+                             }}
+                             className="bg-white text-brand-black px-3 py-1 text-[9px] font-black uppercase border-2 border-brand-black shadow-brutal-xs disabled:opacity-50"
+                           >
+                             Roll Avatar
+                           </button>
+                        </div>
+                      </div>
+                      
+                      <div className="flex-1 grid grid-cols-1 gap-3">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-[8px] font-black uppercase text-zinc-500 mb-1 block">Hair Style</label>
+                            <select 
+                              className="brutalist-input h-8 text-[10px] bg-zinc-800 border-zinc-700 text-white w-full"
+                              value={profileEditData.avatarOptions.hairStyle}
+                              onChange={(e) => setProfileEditData({
+                                ...profileEditData, 
+                                avatarOptions: { ...profileEditData.avatarOptions, hairStyle: e.target.value },
+                                avatarSeed: `${avatarPreview}-${e.target.value}`
+                              })}
+                            >
+                              <option value="shortHair">Short</option>
+                              <option value="longHair">Long</option>
+                              <option value="bob">Bob</option>
+                              <option value="curly">Curly</option>
+                              <option value="shaggy">Shaggy</option>
+                              <option value="frida">Frida</option>
+                              <option value="frizzle">Frizzle</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-[8px] font-black uppercase text-zinc-500 mb-1 block">Hair Color</label>
+                            <select 
+                              className="brutalist-input h-8 text-[10px] bg-zinc-800 border-zinc-700 text-white w-full"
+                              value={profileEditData.avatarOptions.hairColor}
+                              onChange={(e) => setProfileEditData({
+                                ...profileEditData, 
+                                avatarOptions: { ...profileEditData.avatarOptions, hairColor: e.target.value },
+                                avatarSeed: `${avatarPreview}-${e.target.value}`
+                              })}
+                            >
+                              <option value="black">Black</option>
+                              <option value="brown">Brown</option>
+                              <option value="blonde">Blonde</option>
+                              <option value="red">Red</option>
+                              <option value="silverGray">Silver</option>
+                            </select>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-[8px] font-black uppercase text-zinc-500 mb-1 block">Headwear</label>
+                          <select 
+                            className="brutalist-input h-8 text-[10px] bg-zinc-800 border-zinc-700 text-white w-full"
+                            value={profileEditData.avatarOptions.headwear}
+                            onChange={(e) => setProfileEditData({
+                              ...profileEditData, 
+                              avatarOptions: { ...profileEditData.avatarOptions, headwear: e.target.value },
+                              avatarSeed: `${avatarPreview}-${e.target.value}`
+                            })}
+                          >
+                            <option value="none">None</option>
+                            <option value="hat">Hat</option>
+                            <option value="hijab">Hijab</option>
+                            <option value="turban">Turban</option>
+                            <option value="winterHat">Winter Hat</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {isSubscriber && (
+                      <div className="flex gap-2 pt-2 border-t border-zinc-800">
+                        <button 
+                          onClick={() => {
+                            setAvatarPreview(`epic-${Math.random().toString(36).substring(7)}`);
+                            setRollsUsed(prev => prev + 1);
+                          }}
+                          className="flex-1 bg-amber-400 text-brand-black px-2 py-1.5 text-[9px] font-black uppercase rounded shadow-brutal-xs flex items-center justify-center gap-1 active:translate-y-0.5"
+                        >
+                          <Zap size={12} className="fill-brand-black" />
+                          Epic Roll ({user.avatarRolls?.epic || 0})
+                        </button>
+                        <button 
+                          onClick={() => {
+                            setAvatarPreview(`legendary-${Math.random().toString(36).substring(7)}`);
+                            setRollsUsed(prev => prev + 1);
+                          }}
+                          className="flex-1 bg-brand-teal text-brand-black px-2 py-1.5 text-[9px] font-black uppercase rounded shadow-brutal-xs flex items-center justify-center gap-1 active:translate-y-0.5"
+                        >
+                          <Award size={12} />
+                          Legendary ({user.avatarRolls?.legendary || 0})
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Online Hours Selector */}
+                  <div className="space-y-3">
+                    <label className="text-[10px] font-black uppercase text-zinc-400 tracking-[0.2em] block">Availability Window</label>
+                    <div className="bg-zinc-900 border-2 border-zinc-800 p-4">
+                      <div className="flex gap-1 mb-4 justify-between">
+                        {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => {
+                          const isActive = profileEditData.onlineHours.split('|')[0].includes(day);
+                          return (
+                            <button 
+                              key={day}
+                              onClick={() => {
+                                const [days, times] = profileEditData.onlineHours.split('|');
+                                const daysArr = days.split(',').filter(d => d);
+                                let newDays;
+                                if (daysArr.includes(day)) {
+                                  newDays = daysArr.filter(d => d !== day).join(',');
+                                } else {
+                                  newDays = [...daysArr, day].join(',');
+                                }
+                                setProfileEditData({...profileEditData, onlineHours: `${newDays}|${times}`});
+                              }}
+                              className={cn(
+                                "flex-1 py-2 text-[10px] font-black border-2 transition-all",
+                                isActive ? "bg-brand-teal border-brand-teal text-brand-black" : "bg-transparent border-zinc-800 text-zinc-500"
+                              )}
+                            >
+                              {day.charAt(0)}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="flex items-center gap-3">
+                         <div className="flex-1">
+                            <label className="text-[8px] font-black text-zinc-600 uppercase mb-1 block">Open</label>
+                            <select 
+                              className="w-full bg-zinc-800 border border-zinc-700 text-white text-xs p-2 h-10"
+                              value={profileEditData.onlineHours.split('|')[1]?.split('-')[0] || '09:00'}
+                              onChange={(e) => {
+                                const [days, times] = profileEditData.onlineHours.split('|');
+                                const [, close] = (times || '09:00-17:00').split('-');
+                                setProfileEditData({...profileEditData, onlineHours: `${days}|${e.target.value}-${close}`});
+                              }}
+                            >
+                              {Array.from({ length: 24 }).map((_, i) => {
+                                const h = i.toString().padStart(2, '0');
+                                return <option key={h} value={`${h}:00`}>{h}:00</option>;
+                              })}
+                            </select>
+                         </div>
+                         <div className="pt-4 text-zinc-700 font-black">-</div>
+                         <div className="flex-1">
+                            <label className="text-[8px] font-black text-zinc-600 uppercase mb-1 block">Close</label>
+                            <select 
+                              className="w-full bg-zinc-800 border border-zinc-700 text-white text-xs p-2 h-10"
+                              value={profileEditData.onlineHours.split('|')[1]?.split('-')[1] || '17:00'}
+                              onChange={(e) => {
+                                const [days, times] = profileEditData.onlineHours.split('|');
+                                const [open, ] = (times || '09:00-17:00').split('-');
+                                setProfileEditData({...profileEditData, onlineHours: `${days}|${open}-${e.target.value}`});
+                              }}
+                            >
+                              {Array.from({ length: 24 }).map((_, i) => {
+                                const h = i.toString().padStart(2, '0');
+                                return <option key={h} value={`${h}:00`}>{h}:00</option>;
+                              })}
+                            </select>
+                         </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Location Concentration */}
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-end">
+                      <label className="text-[10px] font-black uppercase text-zinc-400 tracking-[0.2em] block">Operational Focus</label>
+                      <span className="text-[8px] font-black uppercase text-brand-teal">{profileEditData.preferredLocations.length}/{isSubscriber ? '12' : '5'} Sites</span>
+                    </div>
+                    <div className="bg-zinc-900 border-2 border-zinc-800 p-4 space-y-4">
+                      <div className="relative">
+                        <input 
+                          type="text" 
+                          value={locationInput}
+                          onChange={(e) => {
+                            setLocationInput(e.target.value);
+                            if (e.target.value.length > 0) {
+                              const filtered = [
+                                "lekki", "Abuja", "mainland", "lento estate", "gwarimpa", "ikoyi", "vi", "ibeju", "maitama", "asokoro", "wuse", "garki", "katampe", "guzape", "jahi"
+                              ].filter(l => l.toLowerCase().includes(e.target.value.toLowerCase()));
+                              setSuggestions(filtered);
+                            } else {
+                              setSuggestions([]);
+                            }
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && locationInput.trim()) {
+                              if (profileEditData.preferredLocations.length < (isSubscriber ? 12 : 5)) {
+                                setProfileEditData({
+                                  ...profileEditData, 
+                                  preferredLocations: [...new Set([...profileEditData.preferredLocations, locationInput.trim()])]
+                                });
+                              }
+                              setLocationInput('');
+                              setSuggestions([]);
+                            }
+                          }}
+                          className="brutalist-input h-12 pl-4 text-xs bg-zinc-800 border-zinc-700 text-white w-full placeholder:text-zinc-500"
+                          placeholder="Type & press Enter to add..."
+                        />
+                        {suggestions.length > 0 && (
+                          <div className="absolute top-full left-0 right-0 z-20 bg-zinc-800 border-x-2 border-b-2 border-zinc-700 max-h-40 overflow-y-auto">
+                            {suggestions.map(s => (
+                              <button 
+                                key={s}
+                                onClick={() => {
+                                  if (profileEditData.preferredLocations.length < (isSubscriber ? 12 : 5)) {
+                                    setProfileEditData({
+                                      ...profileEditData, 
+                                      preferredLocations: [...new Set([...profileEditData.preferredLocations, s])]
+                                    });
+                                  }
+                                  setLocationInput('');
+                                  setSuggestions([]);
+                                }}
+                                className="w-full text-left p-3 text-[10px] font-black uppercase text-white hover:bg-brand-teal hover:text-brand-black border-b border-zinc-700/50"
+                              >
+                                {s}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      
+                      <div className="flex flex-wrap gap-2">
+                        {profileEditData.preferredLocations.map(loc => (
+                          <div key={loc} className="flex items-center gap-2 bg-brand-teal/10 border border-brand-teal px-2 py-1">
+                             <span className="text-[9px] font-black uppercase text-brand-teal line-clamp-1">{loc}</span>
+                             <button 
+                               onClick={() => setProfileEditData({
+                                 ...profileEditData, 
+                                 preferredLocations: profileEditData.preferredLocations.filter(l => l !== loc)
+                               })}
+                               className="text-brand-teal hover:text-white"
+                             >
+                               <X size={12} />
+                             </button>
+                          </div>
+                        ))}
+                      </div>
+                      
+                      {!isSubscriber && profileEditData.preferredLocations.length >= 5 && (
+                        <div className="p-2 bg-brand-red/10 border border-brand-red/30 flex items-center gap-2 italic">
+                          <Zap size={12} className="text-brand-red" />
+                          <p className="text-[8px] font-bold text-brand-red uppercase">Limit reached. Upgrade to Pro for 12 locations.</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="group">
+                    <label className="text-[10px] font-black uppercase text-zinc-400 tracking-[0.2em] mb-1 block">LinkedIn Profile URL</label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <MessageSquare size={14} className="text-brand-teal" />
+                      </div>
+                      <input 
+                        type="url" 
+                        value={profileEditData.linkedin}
+                        onChange={e => setProfileEditData({...profileEditData, linkedin: e.target.value})}
+                        className="brutalist-input h-12 pl-10 text-xs bg-zinc-900 border-zinc-800 text-white w-full placeholder:text-zinc-600"
+                        placeholder="linkedin.com/in/username"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-8">
+                  <button 
+                    onClick={() => {
+                      onUpdateUser({
+                        ...profileEditData,
+                        avatarSeed: profileEditData.avatarSeed || avatarPreview,
+                        profileScore: Math.min(100, user.profileScore + 10)
+                      });
+                      setActiveView('main');
+                    }}
+                    className="brutalist-button-teal w-full py-4 text-xs font-black uppercase shadow-brutal-sm active:translate-y-1 active:shadow-none"
+                  >
+                    DEPLOY ALL CHANGES
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          {activeView === 'Trust Score Details' && (
+            <div className="flex flex-col gap-6">
+              <div className="bg-brand-black text-white p-6 border-4 border-brand-teal shadow-aggressive">
+                <h3 className="text-2xl font-display font-black italic uppercase text-brand-teal mb-1">Trust Score Analysis</h3>
+                <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-6">How your account integrity is calculated</p>
+                
+                <div className="space-y-4">
+                  <ScoreFactor label="Core KYC Verification" score={user.kycStatus === 'Verified' ? 40 : 0} max={40} />
+                  <ScoreFactor label="Account Customization" score={user.bio ? 10 : 5} max={10} />
+                  <ScoreFactor label="Listings Quality" score={listingRequests.length > 0 ? 20 : 5} max={25} />
+                  <ScoreFactor label="Response Speed" score={25} max={25} />
+                </div>
+                
+                <div className="mt-8 pt-6 border-t border-zinc-800 flex justify-between items-end">
+                  <div>
+                    <p className="text-[10px] font-black uppercase text-zinc-400">Total Integrity</p>
+                    <p className="text-4xl font-display font-black text-brand-teal">{user.profileScore}%</p>
+                  </div>
+                  <div className="bg-brand-teal text-brand-black px-3 py-1 font-display font-black text-xs uppercase italic">
+                    {user.profileScore >= 90 ? 'Master Trader' : user.profileScore >= 70 ? 'Gold Tier' : 'Standard'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4">
+                <div className="brutalist-card p-4 bg-white dark:bg-zinc-900">
+                  <div className="flex items-center gap-3 mb-2">
+                    <ShieldCheck className="text-emerald-500" size={20} />
+                    <h4 className="font-display font-black uppercase text-xs">Unlock Exclusive Perks</h4>
+                  </div>
+                  <ul className="space-y-2">
+                    <li className="flex items-center gap-2 text-[10px] font-bold text-zinc-600 uppercase">
+                      <div className="w-1.5 h-1.5 bg-brand-teal" />
+                      Direct Chat with Verified Premium Buyers
+                    </li>
+                    <li className="flex items-center gap-2 text-[10px] font-bold text-zinc-600 uppercase">
+                      <div className="w-1.5 h-1.5 bg-brand-teal" />
+                      Zero-Deposit Inspection Booking
+                    </li>
+                    <li className="flex items-center gap-2 text-[10px] font-bold text-zinc-600 uppercase">
+                      <div className="w-1.5 h-1.5 bg-brand-teal" />
+                      Priority Placement in AISearch Results
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
+          {activeView === 'Price Alerts' && (
+            <>
+              <div className="bg-brand-teal border-4 border-brand-black p-4 shadow-brutal-sm">
+                <div className="flex items-start justify-between mb-2">
+                  <h3 className="font-display font-black uppercase text-lg">Lento Classic Estate</h3>
+                  <span className="bg-brand-black text-white text-[10px] font-black px-2 py-1 tracking-widest">-15%</span>
+                </div>
+                <p className="text-sm font-bold opacity-80 mb-2">Price dropped from ₦400M to ₦350M</p>
+                <button className="bg-brand-black text-white px-4 py-2 text-xs font-black uppercase w-full hover:bg-brand-red transition-colors border-2 border-brand-black">View Property</button>
+              </div>
+              <div className="bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 p-4 shadow-brutal-sm dark:shadow-[2px_2px_0px_0px_#52525b]">
+                <div className="flex items-start justify-between mb-2">
+                  <h3 className="font-display font-black uppercase text-lg">Ochacha Estate</h3>
+                  <span className="bg-brand-red text-white text-[10px] font-black px-2 py-1 tracking-widest">HOT</span>
+                </div>
+                <p className="text-sm font-bold opacity-80 mb-2">High demand alert: 3 new offers made today</p>
+                <button className="bg-brand-teal text-brand-black px-4 py-2 text-xs font-black uppercase w-full hover:bg-brand-black hover:text-white transition-colors border-2 border-brand-black">View Property</button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  function ScoreFactor({ label, score, max }: { label: string; score: number; max: number }) {
+    const percentage = (score / max) * 100;
+    return (
+      <div className="flex flex-col gap-1">
+        <div className="flex justify-between items-end">
+          <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">{label}</span>
+          <span className="text-[10px] font-black uppercase text-brand-teal">{score} / {max}</span>
+        </div>
+        <div className="h-1 bg-zinc-800 border border-zinc-700 overflow-hidden">
+          <div 
+            className="h-full bg-brand-teal shadow-[0_0_8px_rgba(43,220,176,0.3)]" 
+            style={{ width: `${percentage}%` }} 
+          />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-4 flex flex-col gap-6 relative">
+      {/* User Info Card */}
+      <section className="bg-brand-black text-white p-6 border-4 border-brand-black relative overflow-hidden transition-colors duration-300 dark:border-zinc-700">
+        <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
+          <User size={160} />
+        </div>
+        
+        <div className="flex items-center gap-5 relative z-10">
+          <div className="relative group">
+            <div className="w-24 h-24 bg-brand-teal border-4 border-brand-black dark:border-zinc-700 overflow-hidden shadow-brutal-sm group-hover:-translate-x-1 group-hover:-translate-y-1 transition-all">
+              <img 
+                src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.avatarSeed || user.name}&gender=${user.gender === 'Female' ? 'female' : 'male'}`} 
+                alt="Profile" 
+                className="w-full h-full"
+              />
+            </div>
+          </div>
+
+          <div className="flex-1">
+            <div className="flex justify-between items-start">
+              <div>
+                <div className="flex items-center gap-3 mb-1">
+                  <h2 className="text-3xl font-display font-black italic tracking-tighter leading-tight">{user.name}</h2>
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => setIsPreviewing(true)}
+                      className="p-1.5 bg-zinc-800 border border-zinc-700 hover:bg-brand-teal hover:text-brand-black transition-all group/preview"
+                      title="Preview Public Profile"
+                    >
+                      <Eye size={14} className="group-hover/preview:scale-110 transition-transform" />
+                    </button>
+                    <button 
+                      onClick={() => handleAction('Wallet')}
+                      className="flex items-center gap-1.5 px-2 py-1 bg-brand-black border border-brand-teal text-brand-teal hover:bg-brand-teal hover:text-brand-black transition-all shadow-brutal-xs active:translate-y-0.5"
+                      title="Open Wallet"
+                    >
+                      <Zap size={12} className="fill-current" />
+                      <span className="text-[10px] font-black uppercase tracking-widest leading-none">{user.tokens || 0}</span>
+                    </button>
+                  </div>
+                </div>
+                <div className="mb-3">
+                  {renderStars(user.rating || 4.5)}
+                </div>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  <span className={cn(
+                    "text-[9px] font-black uppercase px-2 py-0.5 border border-white/20 flex items-center gap-1",
+                    isSubscriber ? "bg-brand-teal text-brand-black" : "bg-zinc-800 text-zinc-400"
+                  )}>
+                    {isSubscriber ? <Zap size={10} className="fill-brand-black" /> : null}
+                    {isSubscriber ? "Pro Agent" : "Standard"}
+                  </span>
+                  <span className={cn(
+                    "text-[9px] font-black uppercase px-2 py-0.5 border border-white/20 flex items-center gap-1",
+                    user.kycStatus === 'Verified' ? "bg-emerald-500 text-black" : "bg-brand-red text-white"
+                  )}>
+                    {user.kycStatus === 'Verified' ? <ShieldCheck size={10} /> : <AlertTriangle size={10} />}
+                    {user.kycStatus === 'Verified' ? "Verified KYC" : "Unverified"}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <p className="text-[10px] font-black uppercase text-zinc-400 leading-tight max-w-xs">{user.bio || "No bio added yet."}</p>
+          </div>
+        </div>
+
+        {/* Global Trust Score Gauge */}
+        <div className="mt-8 pt-6 border-t-2 border-white/10 relative z-10">
+          <div className="flex justify-between items-end mb-2">
+            <div>
+              <p className="text-[9px] font-black uppercase text-zinc-500 tracking-widest italic mb-0.5">Global Trust & Integrity Score</p>
+              <h3 className="text-2xl font-display font-black text-brand-teal tracking-tighter">{user.profileScore}<span className="text-sm text-zinc-600">/100</span></h3>
+            </div>
+                <div className="text-right">
+                  <button 
+                    onClick={() => setActiveView('Trust Score Details')}
+                    className="text-[10px] font-black uppercase text-brand-teal hover:underline"
+                  >
+                    View Breakdown
+                  </button>
+                  <div className="mt-1">
+                    <span className="text-[10px] font-black uppercase text-brand-red bg-brand-red/10 px-2 py-1 border border-brand-red/30">
+                      Level {Math.floor(user.profileScore / 25) + 1} Access
+                    </span>
+                  </div>
+                </div>
+          </div>
+          <div className="h-3 bg-zinc-900 border-2 border-brand-teal/20 relative overflow-hidden">
+            <motion.div 
+              initial={{ width: 0 }}
+              animate={{ width: `${user.profileScore}%` }}
+              transition={{ duration: 1, ease: "easeOut" }}
+              className={cn(
+                "h-full shadow-[0_0_10px_rgba(43,220,176,0.3)]",
+                user.profileScore < 50 ? "bg-brand-red" : user.profileScore < 75 ? "bg-amber-400" : "bg-brand-teal"
+              )}
+            />
+          </div>
+          <p className="mt-2 text-[8px] font-black uppercase text-zinc-500 tracking-widest leading-tight">
+            Score based on KYC documents, trade history, and account activity. High scores unlock direct buyer leads and lower commission fees.
+          </p>
+        </div>
+      </section>
+
+      {/* KYC Alert Banner */}
+      {user.kycStatus !== 'Verified' && (
+        <motion.div 
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-brand-red/5 border-l-8 border-brand-red p-4 flex items-center justify-between gap-4"
+        >
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-brand-red text-white rotate-6">
+              <Award size={20} />
+            </div>
+            <div>
+              <p className="text-xs font-display font-black uppercase dark:text-gray-100">Action Required: Document Verification</p>
+              <p className="text-[9px] font-bold text-zinc-500 uppercase tracking-tight">Your trust score is low. Complete KYC to verify your identity.</p>
+            </div>
+          </div>
+          <button 
+            onClick={() => handleAction('Complete KYC')}
+            className="brutalist-button-red py-2 px-4 text-[10px] h-auto"
+          >
+            Verify Now
+          </button>
+        </motion.div>
+      )}
+
+      {/* Quick Actions Grid */}
+      <section className="grid grid-cols-2 gap-4">
+        <ActionButton 
+          icon={<PlusCircle className="text-brand-red" />} 
+          label="Request Listing" 
+          subLabel="Submit property"
+          onClick={() => handleAction('Request Listing')}
+        />
+        <ActionButton 
+          icon={<Edit3 className="text-brand-teal" />} 
+          label="Customize Profile" 
+          subLabel="Agent Resume & Info"
+          onClick={() => handleAction('Customize Profile')}
+        />
+      </section>
+
+      {/* List Options */}
+      <section className="flex flex-col gap-2">
+        <h3 className="text-xs font-display font-black uppercase text-zinc-400 tracking-widest pl-2">Personal Management</h3>
+        <div className="brutalist-card p-2 flex flex-col divide-y-2 divide-zinc-100">
+          <ListOption icon={<PlusCircle size={18} />} label="My Listings" onClick={() => handleAction('My Listings')} />
+          <ListOption icon={<Heart size={18} />} label="Saved Properties" onClick={() => handleAction('Saved Properties')} />
+          <ListOption icon={<History size={18} />} label="Viewed History" onClick={() => handleAction('Viewed History')} />
+          <ListOption icon={<Bell size={18} />} label="Price Alerts" badge="05" onClick={() => handleAction('Price Alerts')} />
+          
+          <div className="flex items-center justify-between p-3 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors w-full border-t-2 border-zinc-100 dark:border-zinc-800">
+            <div className="flex items-center gap-3">
+              <div className={cn("transition-colors", isSubscriber ? "text-brand-teal" : "text-zinc-400")}>
+                <Zap size={18} className={cn(isSubscriber && "fill-brand-teal")} />
+              </div>
+              <span className="text-sm font-bold uppercase tracking-tight text-brand-black dark:text-white">
+                {isSubscriber ? "Active Pro Agent" : "Upgrade to Pro"}
+              </span>
+            </div>
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                onUpdateUser({ isSubscriber: !isSubscriber });
+              }}
+              className={cn(
+                "w-10 h-5 rounded-full p-0.5 transition-all border-2 border-brand-black flex items-center shadow-brutal-xs active:translate-y-0.5",
+                isSubscriber ? "bg-brand-teal" : "bg-zinc-200 dark:bg-zinc-700"
+              )}
+              aria-label="Toggle Pro Subscription"
+            >
+              <div className={cn(
+                "w-3 h-3 rounded-full bg-white border border-brand-black transition-all",
+                isSubscriber ? "translate-x-5" : "translate-x-0"
+              )} />
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="flex flex-col gap-2">
+        <h3 className="text-xs font-display font-black uppercase text-zinc-400 tracking-widest pl-2">System</h3>
+        <div className="brutalist-card p-2 flex flex-col divide-y-2 divide-zinc-100">
+          <ListOption icon={<Settings size={18} />} label="Account Settings" onClick={() => handleAction('Account Settings')} />
+          <ListOption icon={<HelpCircle size={18} />} label="Support Center" onClick={() => handleAction('Support Center')} />
+          <ListOption icon={<LogOut size={18} className="text-red-500" />} label="Sign Out" onClick={() => handleAction('Sign Out')} />
+        </div>
+      </section>
+
+      <div className="text-center py-4">
+        <p className="text-[10px] font-black uppercase text-zinc-400 tracking-tighter">RealAgents v1.0.4 - Built for Profit</p>
+      </div>
+
+      {/* Action Modal */}
+      <AnimatePresence>
+        {activeModal && (
+          <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-4 sm:p-0">
+            <motion.div 
+               initial={{ opacity: 0 }}
+               animate={{ opacity: 1 }}
+               exit={{ opacity: 0 }}
+               onClick={() => setActiveModal(null)}
+               className="absolute inset-0 bg-brand-black/40 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ y: '100%', opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: '100%', opacity: 0 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="relative w-full max-w-sm bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 shadow-aggressive flex flex-col max-h-[90vh] overflow-hidden"
+            >
+              <div className="p-4 border-b-4 border-brand-black bg-brand-gray flex justify-between items-center text-brand-black shrink-0">
+                <h2 className="text-lg font-display font-black uppercase tracking-tight">{activeModal}</h2>
+                <button 
+                  onClick={() => setActiveModal(null)}
+                  className="p-1 border-2 border-brand-black bg-brand-red text-white hover:rotate-90 transition-transform shadow-brutal-sm"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+              
+              <div className="p-6 overflow-y-auto">
+                {activeModal === 'Complete KYC' ? (
+                  <div className="space-y-6">
+                    {user.kycStatus === 'Verified' ? (
+                      <div className="py-10 text-center flex flex-col items-center gap-4">
+                        <div className="w-16 h-16 bg-emerald-500 border-4 border-brand-black flex items-center justify-center rounded-full text-white">
+                          <ShieldCheck size={32} />
+                        </div>
+                        <div>
+                          <h3 className="font-display font-black text-xl uppercase italic text-brand-black">YOU ARE VERIFIED</h3>
+                          <p className="text-xs font-bold text-zinc-500 uppercase mt-2 text-brand-teal">Maximum trade integrity achieved.</p>
+                        </div>
+                      </div>
+                    ) : isSubmittingKYC ? (
+                      <div className="py-10 text-center flex flex-col items-center gap-6">
+                        <div className="w-16 h-16 border-4 border-brand-black border-t-brand-teal animate-spin rounded-full"></div>
+                        <div>
+                          <h3 className="font-display font-black text-xl uppercase italic text-brand-black">UPDATING BIOMETRICS</h3>
+                          <p className="text-xs font-bold text-zinc-500 uppercase mt-2">AI is cross-referencing Stage 1-3 intel...</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-6">
+                        <div className="flex items-center justify-between mb-4">
+                          {[1, 2, 3].map((step) => (
+                            <div key={step} className="flex items-center gap-2">
+                              <div className={cn(
+                                "w-6 h-6 flex items-center justify-center text-[10px] font-black border-2",
+                                kycStage === step ? "bg-brand-teal border-brand-black" : (kycStage > step ? "bg-brand-black text-white" : "bg-zinc-100 text-zinc-400")
+                              )}>
+                                {kycStage > step ? <CheckCircle size={12} /> : step}
+                              </div>
+                              {step < 3 && <div className="w-4 h-0.5 bg-zinc-200" />}
+                            </div>
+                          ))}
+                        </div>
+
+                        {kycStage === 1 && (
+                          <div className="space-y-4">
+                            <h4 className="text-xs font-display font-black uppercase italic text-brand-teal">Stage 1: Basic Intelligence</h4>
+                            <div className="space-y-3">
+                              <div className="group">
+                                <label className="text-[8px] font-black uppercase text-zinc-400 tracking-widest mb-1 block">Full Name (Legal)</label>
+                                <input 
+                                  type="text" 
+                                  value={profileEditData.name}
+                                  onChange={e => setProfileEditData({...profileEditData, name: e.target.value})}
+                                  className="brutalist-input h-10 text-xs w-full bg-white"
+                                />
+                              </div>
+                              <div className="group">
+                                <label className="text-[8px] font-black uppercase text-zinc-400 tracking-widest mb-1 block">Gender Identity</label>
+                                <select 
+                                  value={profileEditData.gender}
+                                  onChange={e => setProfileEditData({...profileEditData, gender: e.target.value as any})}
+                                  className="brutalist-input h-10 text-xs w-full bg-white"
+                                >
+                                  <option value="Male">Male</option>
+                                  <option value="Female">Female</option>
+                                  <option value="Other">Other</option>
+                                  <option value="Prefer not to say">Prefer not to say</option>
+                                </select>
+                              </div>
+                              <div className="group">
+                                <label className="text-[8px] font-black uppercase text-zinc-400 tracking-widest mb-1 block">Date of Birth</label>
+                                <input type="date" className="brutalist-input h-10 text-xs w-full bg-white" />
+                              </div>
+                            </div>
+                            <button 
+                              onClick={() => setKycStage(2)}
+                              className="brutalist-button-teal w-full py-3 text-xs"
+                            >
+                              PROCEED TO LIVENESS
+                            </button>
+                          </div>
+                        )}
+
+                        {kycStage === 2 && (
+                          <div className="space-y-6">
+                            <h4 className="text-xs font-display font-black uppercase italic text-brand-teal">Stage 2: Liveness Verification</h4>
+                            <div className="bg-brand-black aspect-video relative overflow-hidden border-4 border-brand-black">
+                              <div className="absolute inset-0 flex flex-col items-center justify-center text-white p-4 text-center">
+                                {livenessStep === 0 ? (
+                                  <div className="space-y-4">
+                                    <Camera size={32} className="mx-auto text-brand-teal" />
+                                    <p className="text-[10px] font-black uppercase tracking-widest">Position face in frame</p>
+                                    <button 
+                                      onClick={() => setLivenessStep(1)}
+                                      className="bg-brand-teal text-brand-black px-4 py-2 text-[10px] font-black uppercase"
+                                    >
+                                      Start
+                                    </button>
+                                  </div>
+                                ) : livenessStep === 1 ? (
+                                  <div className="space-y-4">
+                                    <motion.div animate={{ scale: [1, 1.1, 1] }} transition={{ repeat: Infinity }} className="text-2xl font-display font-black uppercase text-brand-teal">Open Your Mouth</motion.div>
+                                    <div className="mt-10 h-1 w-24 bg-zinc-800 rounded-full">
+                                      <motion.div initial={{ width: 0 }} animate={{ width: '100%' }} transition={{ duration: 2 }} onAnimationComplete={() => setLivenessStep(2)} className="h-full bg-brand-teal" />
+                                    </div>
+                                  </div>
+                                ) : livenessStep === 2 ? (
+                                  <div className="space-y-4">
+                                    <motion.div animate={{ scale: [1, 1.1, 1] }} transition={{ repeat: Infinity }} className="text-2xl font-display font-black uppercase text-brand-teal">Blink Twice</motion.div>
+                                    <div className="mt-10 h-1 w-24 bg-zinc-800 rounded-full">
+                                      <motion.div initial={{ width: 0 }} animate={{ width: '100%' }} transition={{ duration: 2 }} onAnimationComplete={() => setLivenessStep(3)} className="h-full bg-brand-teal" />
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="space-y-4 text-center">
+                                    <CheckCircle size={32} className="mx-auto text-emerald-500" />
+                                    <p className="font-display font-black uppercase text-brand-teal">Passed</p>
+                                    <button onClick={() => setKycStage(3)} className="bg-white text-brand-black px-3 py-1 text-[10px] font-black uppercase border-2 border-brand-teal">Next</button>
+                                  </div>
+                                )}
+                              </div>
+                              <div className="absolute inset-0 border-[40px] border-black/40 pointer-events-none">
+                                <div className="w-full h-full border-2 border-brand-teal/50 rounded-[100%]" />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {kycStage === 3 && (
+                          <div className="space-y-6">
+                            <h4 className="text-xs font-display font-black uppercase italic text-brand-teal">Stage 3: Documentation</h4>
+                            <div className="bg-brand-gray p-4 border-2 border-brand-black space-y-4">
+                              <div className="grid grid-cols-1 gap-3">
+                                {[
+                                  { id: 'nin', icon: <FileText size={14} />, label: "NIN" },
+                                  { id: 'passport', icon: <Camera size={14} />, label: "Passport" },
+                                  { id: 'utility', icon: <MapPin size={14} />, label: "Utility" },
+                                ].map((doc) => {
+                                  const isSelected = kycFiles.includes(doc.id);
+                                  const fileName = uploadedKycFiles[doc.id];
+                                  return (
+                                    <div key={doc.id} className="flex flex-col gap-1">
+                                      <label className={cn("flex items-center gap-3 p-3 border-2 cursor-pointer", isSelected ? "border-brand-teal bg-brand-teal/10" : "bg-white")}>
+                                        <input type="checkbox" className="hidden" checked={isSelected} onChange={() => setKycFiles(isSelected ? kycFiles.filter(f => f !== doc.id) : [...kycFiles, doc.id])} />
+                                        <span className="text-[10px] font-black uppercase flex-1">{doc.label}</span>
+                                        {isSelected && <CheckCircle size={14} className="text-brand-teal" />}
+                                      </label>
+                                      {isSelected && (
+                                        <div className="p-2 border-x-2 border-b-2 border-brand-teal bg-white flex items-center justify-between gap-2">
+                                          <span className="text-[8px] font-black uppercase text-zinc-400 truncate flex-1">{fileName || "Upload file"}</span>
+                                          <label className="bg-brand-black text-white px-2 py-1 text-[8px] font-black uppercase cursor-pointer">
+                                            Upload
+                                            <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => handleKycFileUpload(doc.id, e)} />
+                                          </label>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                            <button 
+                              disabled={kycFiles.length < 1 || Object.keys(uploadedKycFiles).length < 1}
+                              onClick={() => {
+                                setIsSubmittingKYC(true);
+                                setTimeout(() => {
+                                  onUpdateUser({ kycStatus: 'Verified', profileScore: Math.min(100, user.profileScore + 40) });
+                                  setIsSubmittingKYC(false);
+                                  setActiveModal(null);
+                                  setKycStage(1);
+                                  setLivenessStep(0);
+                                }, 3000);
+                              }}
+                              className="brutalist-button-teal w-full py-4 text-xs font-black"
+                            >
+                              FINALIZE
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : activeModal === 'Additional Listing Cost' ? (
+                  <div className="p-8 flex flex-col items-center justify-center min-h-[200px] text-center gap-4">
+                    <div className="w-16 h-16 border-4 border-brand-black bg-brand-teal flex items-center justify-center rotate-3 shadow-brutal-sm text-brand-black">
+                      <PlusCircle size={32} />
+                    </div>
+                    <div>
+                      <h3 className="font-display font-black text-xl uppercase italic mb-1">ADDITIONAL LISTING</h3>
+                      <p className="text-xs uppercase font-bold text-zinc-500">You have reached your included quota ({isSubscriber ? '6' : '2'} listings).</p>
+                      <p className="text-[10px] font-black text-brand-teal uppercase mt-2 tracking-widest border-2 border-brand-teal p-2 bg-brand-teal/5 italic">
+                        Cost: {ADDITIONAL_LISTING_COST} Tokens
+                      </p>
+                    </div>
+                    <div className="flex flex-col gap-2 w-full mt-4">
+                      <button 
+                        onClick={() => {
+                          if (user.tokens >= ADDITIONAL_LISTING_COST) {
+                            setActiveModal(null);
+                            window.dispatchEvent(new CustomEvent('open-listing-flow'));
+                          } else {
+                            setActiveModal('Insufficient Tokens');
+                          }
+                        }}
+                        className="bg-brand-black text-white font-display font-black uppercase text-sm py-3 border-2 border-brand-black shadow-brutal-sm active:translate-y-1 transition-all"
+                      >
+                        Accept & Proceed
+                      </button>
+                      <button 
+                        onClick={() => setActiveModal(null)}
+                        className="text-[10px] font-black uppercase text-zinc-400 hover:text-brand-black transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : activeModal === 'Insufficient Tokens' ? (
+                  <div className="p-8 flex flex-col items-center justify-center min-h-[200px] text-center gap-4">
+                    <div className="w-16 h-16 border-4 border-brand-black bg-brand-red flex items-center justify-center rotate-3 shadow-brutal-sm">
+                      <Zap size={32} className="text-white -rotate-3 fill-white" />
+                    </div>
+                    <div>
+                      <h3 className="font-display font-black text-xl uppercase italic mb-1 text-brand-red">OUT OF TOKENS</h3>
+                      <p className="text-xs uppercase font-bold text-zinc-500">You need more fuel to execute this operation.</p>
+                    </div>
+                    <button 
+                      onClick={() => { setActiveModal(null); setActiveView('Wallet'); }} 
+                      className="mt-4 w-full bg-brand-black text-brand-teal font-display font-black uppercase text-sm py-3 border-2 border-brand-black shadow-brutal-sm"
+                    >
+                      Refill Wallet
+                    </button>
+                  </div>
+                ) : activeModal === 'Boost Limit Reached' ? (
+                  <div className="p-8 flex flex-col items-center justify-center min-h-[200px] text-center gap-4">
+                    <div className="w-16 h-16 border-4 border-brand-black bg-amber-400 flex items-center justify-center rotate-3 shadow-brutal-sm text-brand-black">
+                      <Zap size={32} className="fill-brand-black" />
+                    </div>
+                    <div>
+                      <h3 className="font-display font-black text-xl uppercase italic mb-1">BOOST LIMIT REACHED</h3>
+                      <p className="text-xs uppercase font-bold text-zinc-500">Pro Agents can have 3 active boosts simultaneously.</p>
+                      <p className="text-[10px] font-black text-brand-teal uppercase mt-2">* Unboost a listing to free up slots</p>
+                    </div>
+                    <button onClick={() => setActiveModal(null)} className="mt-4 w-full bg-brand-black text-white font-display font-black uppercase text-sm py-3 border-2 border-brand-black shadow-brutal-sm">Understood</button>
+                  </div>
+                ) : (
+                  <div className="p-8 flex flex-col items-center justify-center min-h-[200px] text-center gap-4">
+                    <div className="w-16 h-16 border-4 border-brand-black bg-brand-teal flex items-center justify-center rotate-3">
+                      <Settings size={32} className="text-brand-black -rotate-3" />
+                    </div>
+                    <div>
+                      <h3 className="font-display font-black text-xl uppercase italic mb-1">UPGRADE TO PRO</h3>
+                      <p className="text-xs uppercase font-bold text-zinc-500">Feature Restricted.</p>
+                    </div>
+                    <button onClick={() => setActiveModal(null)} className="mt-4 w-full bg-brand-black text-white font-display font-black uppercase text-sm py-3 border-2 border-brand-black shadow-brutal-sm">Acknowledge</button>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+    </div>
+  );
+}
+
+function StatusBadge({ status }: { status: ListingStatus }) {
+  const config: Record<ListingStatus, { icon: React.ReactNode, bg: string, text: string, border: string }> = {
+    'Pending': { 
+      icon: <Clock size={10} />, 
+      bg: 'bg-zinc-100 dark:bg-zinc-800', 
+      text: 'text-zinc-500', 
+      border: 'border-zinc-300 dark:border-zinc-600' 
+    },
+    'Inspection Scheduled': { 
+      icon: <Calendar size={10} />, 
+      bg: 'bg-brand-teal/10', 
+      text: 'text-brand-teal', 
+      border: 'border-brand-teal/50' 
+    },
+    'Under Review': { 
+      icon: <Zap size={10} />, 
+      bg: 'bg-amber-100 dark:bg-amber-900/30', 
+      text: 'text-amber-600 dark:text-amber-400', 
+      border: 'border-amber-400/50' 
+    },
+    'Approved': { 
+      icon: <CheckCircle size={10} />, 
+      bg: 'bg-emerald-100 dark:bg-emerald-900/30', 
+      text: 'text-emerald-600 dark:text-emerald-400', 
+      border: 'border-emerald-400/50' 
+    },
+    'Rejected': { 
+      icon: <AlertTriangle size={10} />, 
+      bg: 'bg-brand-red/10', 
+      text: 'text-brand-red', 
+      border: 'border-brand-red/50' 
+    },
+    'Archived': {
+      icon: <Power size={10} />,
+      bg: 'bg-zinc-800',
+      text: 'text-zinc-500',
+      border: 'border-zinc-700'
+    }
+  };
+
+  const { icon, bg, text, border } = config[status];
+
+  return (
+    <div className={cn(
+      "flex items-center gap-1.5 px-2 py-1 border-2 text-[9px] font-black uppercase tracking-tight shadow-brutal-xs",
+      bg, text, border
+    )}>
+      {icon}
+      {status}
+    </div>
+  );
+}
+
+function StatBox({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="bg-zinc-800 p-2 border border-zinc-700 flex flex-col items-center">
+      <span className="text-[9px] font-black uppercase text-zinc-500">{label}</span>
+      <span className="text-lg font-display font-black">{value}</span>
+    </div>
+  );
+}
+
+function ActionButton({ icon, label, subLabel, onClick }: { icon: React.ReactNode; label: string; subLabel: string; onClick?: () => void }) {
+  return (
+    <button onClick={onClick} className="brutalist-card p-4 flex flex-col items-start gap-2 hover:bg-brand-gray dark:hover:bg-zinc-800 text-left">
+      {icon}
+      <div>
+        <p className="text-xs font-display font-black uppercase tracking-tight leading-none text-brand-black dark:text-brand-gray">{label}</p>
+        <p className="text-[9px] font-bold text-zinc-500 uppercase">{subLabel}</p>
+      </div>
+    </button>
+  );
+}
+
+function ListOption({ icon, label, badge, onClick }: { icon: React.ReactNode; label: string; badge?: string; onClick?: () => void }) {
+  return (
+    <button onClick={onClick} className="flex items-center justify-between p-3 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors w-full text-left">
+      <div className="flex items-center gap-3">
+        <div className="text-zinc-600 dark:text-zinc-400">{icon}</div>
+        <span className="text-sm font-bold uppercase tracking-tight text-brand-black dark:text-white">{label}</span>
+      </div>
+      <div className="flex items-center gap-2">
+        {badge && (
+          <span className="bg-brand-red text-white text-[10px] font-black px-1.5 py-0.5 border border-brand-black dark:border-transparent shadow-brutal-sm dark:shadow-[2px_2px_0px_0px_#52525b]">
+            {badge}
+          </span>
+        )}
+        <ChevronRight size={16} className="text-zinc-300 dark:text-zinc-600" />
+      </div>
+    </button>
+  );
+}
