@@ -1,0 +1,23 @@
+LISTING TERMS & CONDITIONS - FULL TEXT
+Last Updated: May 2026
+
+1. REALAGENT SUBSCRIPTION
+Agent verification is no longer required to list properties on the RealAgents platform. However, possessing an active RealAgent Subscription significantly elevates your listing's visibility and improves your chances of a successful sale or rental, as the algorithm prioritizes verified and subscribed agents.
+
+2. INFORMATION ACCURACY & LIABILITY
+Mandatory physical inspections by the RealAgents team have been removed to expedite the listing process. Consequently, all information provided (including property size, location coordinates, condition, features, and target pricing) must be strictly correct. The user retains full responsibility for the accuracy of their listings. Any misrepresentations, false claims, or severe discrepancies discovered by buyers, renters, or our automated checks represent a material breach of these terms. All information must be accurate, else your listing will be taken down, and your trust score will lose 25% for 30 days as penalty.
+
+3. RAPID VERIFICATION
+Following submission, property verification and listing activation typically take approximately 24 hours. The automated review verifies listing completeness, flags mismatched price-to-spec ratios, and validates provided identity artifacts. The platform does not guarantee activation if minimum trust score requirements are unmet or if information is deemed suspicious.
+
+4. FLEXIBLE COMMISSION
+There is no fixed platform commission mandated by RealAgents. Agents independently decide and declare their own commision rates (0.5% - 5% for sales, and 10% - 20% Agency and Legal for rentals). This commission rate must remain visible and will reflect on the property listing for full market transparency and consumer trust.
+
+5. AUTO-REMOVAL TIMER
+All listings are active for a period of exactly 30 days from the moment of activation. Exclusive notice is no longer needed to take a property offline. To ensure marketplace accuracy and prevent stale listings, properties that are not manually renewed by the listing agent will be automatically removed after this 30-day period. You will receive a notification 48 hours beforehand to renew the listing if the property is still available on the market.
+
+6. MARKETING PROMOTIONAL RIGHTS
+By uploading photography, videography, text descriptions, and other listing data, you grant RealAgents a non-exclusive, irrevocable, royalty-free license to utilize this content. We reserve the right to use property images and listing data in our marketing materials, promotional content, digital advertising, and social media campaigns without prior request or compensation.
+
+7. LIABILITY & COMPLIANCE
+RealAgents functions strictly as an intelligent matching and marketplace platform. We are not liable for any negotiation fallouts, failed transactions, payment disputes, or fraudulent activities between users and listers. All listed properties and terms of trade must fully comply with local housing, zoning, and real estate development laws. You agree to fully indemnify RealAgents against any legal actions or claims arising from your listing activity.

@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   User, Settings, Heart, History, HelpCircle, 
   ChevronRight, ShieldCheck, LogOut, PlusCircle,
   Briefcase, Bell, Zap, X, MapPin, ArrowLeft,
-  Eye, BarChart3, Edit3, Power, MessageSquare, Save, Star
+  Eye, BarChart3, Edit3, Power, MessageSquare, Save, Star, Dices, Lock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
@@ -11,33 +11,36 @@ import { ListingRequest, ListingStatus, User as UserType } from '../types';
 import { mockProperties } from '../data/mockListings';
 import { PropertyCard } from './Marketplace';
 import { formatCurrency, parseFormattedNumber, formatNumberString } from '../lib/utils';
-import { Clock, CheckCircle, AlertTriangle, Calendar, Award, Camera, FileText, Phone, Mail } from 'lucide-react';
+import { Clock, CheckCircle, AlertTriangle, Calendar, Award, Camera, FileText, Phone, Mail, Facebook } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { useNavigation } from '../context/NavigationContext';
+import { getUserAvatarUrl } from '../lib/avatar';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 
-export default function Profile({ 
-  user,
-  onUpdateUser,
-  onSelectProperty, 
-  savedProperties = [], 
-  onToggleSave, 
-  onViewAgentProfile,
-  viewedProperties = [],
-  listingRequests = [],
-  onUpdateUser: _onUpdateUser, // To avoid shadowing
-  onUpdateListingRequest
-}: { 
-  user: UserType,
-  onUpdateUser: (updates: Partial<UserType>) => void,
-  onSelectProperty?: (id: string) => void, 
-  savedProperties?: string[], 
-  onToggleSave?: (id: string) => void, 
-  onViewAgentProfile?: (id: string) => void,
-  viewedProperties?: string[],
-  listingRequests?: ListingRequest[],
-  onUpdateListingRequest?: (id: string, updates: Partial<ListingRequest>) => void
-}) {
+export default function Profile({ initialView = 'main' }: { initialView?: 'main' | 'Saved Properties' | 'Viewed History' | 'Price Alerts' | 'My Listings' | 'Trust Score Details' | 'Customize Profile' | 'Wallet' }) {
+  const { 
+    user, 
+    updateUser, 
+    listingRequests, 
+    updateListingRequest, 
+    savedProperties, 
+    toggleSavedProperty, 
+    logout, 
+    signInWithGoogle, 
+    signInWithFacebook 
+  } = useAuth();
+  const { handleSelectProperty: onSelectProperty, setSelectedAgentId: onViewAgentProfile, viewedProperties } = useNavigation();
+
+  if (!user) return null;
+
   const [activeModal, setActiveModal] = useState<string | null>(null);
-  const [activeView, setActiveView] = useState<'main' | 'Saved Properties' | 'Viewed History' | 'Price Alerts' | 'My Listings' | 'Trust Score Details' | 'Customize Profile' | 'Wallet'>('main');
+  const [activeView, setActiveView] = useState<'main' | 'Saved Properties' | 'Viewed History' | 'Price Alerts' | 'My Listings' | 'Trust Score Details' | 'Customize Profile' | 'Wallet'>(initialView);
   
+  useEffect(() => {
+    setActiveView(initialView);
+  }, [initialView]);
+
   const LISTING_LIMIT_FREE = 2;
   const LISTING_LIMIT_PRO = 6;
   const ADDITIONAL_LISTING_COST = 10;
@@ -53,7 +56,7 @@ export default function Profile({
         description,
         timestamp: new Date().toISOString()
       };
-      onUpdateUser({
+      updateUser({
         tokens: user.tokens - amount,
         transactions: [newTransaction, ...(user.transactions || [])]
       });
@@ -71,7 +74,7 @@ export default function Profile({
       description: `Purchased ${tokens} tokens`,
       timestamp: new Date().toISOString()
     };
-    onUpdateUser({
+    updateUser({
       tokens: user.tokens + tokens,
       transactions: [newTransaction, ...(user.transactions || [])]
     });
@@ -83,21 +86,80 @@ export default function Profile({
   // Profile Edit State
   const [profileEditData, setProfileEditData] = useState({
     name: user.name,
+    firstName: user.firstName || '',
+    lastName: user.lastName || '',
     bio: user.bio || '',
     phoneNumber: user.phoneNumber || '',
     avatarSeed: user.avatarSeed || 'User',
+    avatarUrl: user.avatarUrl || '',
+    avatarTier: user.avatarTier || 'Standard',
     role: user.role || 'Buyer',
     linkedin: user.linkedin || '',
     onlineHours: user.onlineHours || 'Mon,Tue,Wed,Thu,Fri|09:00-17:00',
     specializationArea: user.specializationArea || '',
     preferredLocations: user.preferredLocations || [],
     gender: user.gender || 'Prefer not to say',
-    avatarOptions: {
+    avatarOptions: user.avatarOptions || {
       hairStyle: 'shortHair',
       hairColor: 'black',
       headwear: 'none'
     }
   });
+
+  const [isCheckingName, setIsCheckingName] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [nameAvailable, setNameAvailable] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (!profileEditData.name || profileEditData.name === user.name) {
+      setNameError(null);
+      setNameAvailable(null);
+      return;
+    }
+
+    const checkName = async () => {
+      setIsCheckingName(true);
+      setNameError(null);
+      setNameAvailable(null);
+
+      if (user?.isGuest) {
+        setNameAvailable(true);
+        setIsCheckingName(false);
+        return;
+      }
+
+      try {
+        const usersRef = collection(db, 'users');
+        const q = query(usersRef, where('name', '==', profileEditData.name));
+        const querySnapshot = await getDocs(q);
+        
+        let foundOtherUser = false;
+        querySnapshot.forEach((doc) => {
+          if (doc.id !== user.id) {
+            foundOtherUser = true;
+          }
+        });
+
+        if (foundOtherUser) {
+          setNameError('This display name is already taken.');
+          setNameAvailable(false);
+        } else {
+          setNameAvailable(true);
+        }
+      } catch (err) {
+        console.error('Error checking name:', err);
+      } finally {
+        setIsCheckingName(false);
+      }
+    };
+
+    const timer = setTimeout(checkName, 500);
+    return () => clearTimeout(timer);
+  }, [profileEditData.name, user.id, user.name]);
+
+  const onUpdateUser = updateUser;
+  const onUpdateListingRequest = updateListingRequest;
+  const onToggleSave = toggleSavedProperty;
 
   const [avatarPreview, setAvatarPreview] = useState(user.avatarSeed || 'User');
   const [rollsUsed, setRollsUsed] = useState(0);
@@ -112,6 +174,16 @@ export default function Profile({
   const [uploadedKycFiles, setUploadedKycFiles] = useState<Record<string, string>>({});
   const [isSubmittingKYC, setIsSubmittingKYC] = useState(false);
 
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (activeModal === 'Complete KYC' && kycStage === 2 && livenessStep !== 3) {
+      timer = setTimeout(() => {
+        setLivenessStep(3);
+      }, 15000);
+    }
+    return () => clearTimeout(timer);
+  }, [activeModal, kycStage, livenessStep]);
+
   const handleKycFileUpload = (docId: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -125,6 +197,10 @@ export default function Profile({
   const isSubscriber = user.isSubscriber;
 
   const handleAction = (action: string) => {
+    if (action === 'Sign Out') {
+      logout();
+      return;
+    }
     if (action === 'Request Listing') {
       const currentLimit = isSubscriber ? LISTING_LIMIT_PRO : LISTING_LIMIT_FREE;
       const isAboveLimit = (listingRequests?.length || 0) >= currentLimit;
@@ -189,9 +265,13 @@ export default function Profile({
                <div className="flex gap-6 items-start mb-8">
                  <div className="w-32 h-32 bg-brand-teal border-4 border-brand-black overflow-hidden shadow-brutal">
                    <img 
-                     src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.avatarSeed || user.name}&gender=${user.gender === 'Female' ? 'female' : 'male'}`} 
+                     src={getUserAvatarUrl(user)} 
                      alt="Preview" 
                      className="w-full h-full"
+                     referrerPolicy="no-referrer"
+                     onError={(e) => {
+                       (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=2bdctb&color=000`;
+                     }}
                    />
                  </div>
                  <div className="flex-1">
@@ -322,7 +402,7 @@ export default function Profile({
                     <p className="text-zinc-500 font-bold max-w-xs uppercase text-xs">Submit a property listing request to track it here.</p>
                   </div>
                   <button 
-                    onClick={() => window.dispatchEvent(new CustomEvent('open-listing-flow'))}
+                    onClick={() => handleAction('Request Listing')}
                     className="brutalist-button-teal mt-4 px-8"
                   >
                     Host a Listing
@@ -330,9 +410,18 @@ export default function Profile({
                 </div>
               ) : (
                 <div className="flex flex-col gap-4">
-                  <div className="bg-brand-black text-white p-3 border-b-4 border-brand-teal mb-2 flex justify-between items-center">
-                    <h2 className="text-[10px] font-black uppercase tracking-[0.2em]">Listing Pipeline Status</h2>
-                    <span className="text-[8px] font-black uppercase opacity-60">
+                  <div className="flex items-center justify-between mt-2 mb-2">
+                    <h3 className="text-2xl font-display font-black uppercase italic">Your Listings</h3>
+                    <button
+                      onClick={() => handleAction('Request Listing')}
+                      className="bg-brand-black text-white px-4 py-2 border-2 border-brand-black hover:bg-brand-teal hover:text-brand-black transition-all shadow-brutal-sm hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none flex items-center gap-2 text-xs font-black uppercase tracking-wide"
+                    >
+                      <PlusCircle size={14} /> Add Listing
+                    </button>
+                  </div>
+                  <div className="bg-brand-black text-white p-3 border-b-4 border-brand-teal flex justify-between items-center text-left">
+                    <h2 className="text-[10px] font-black uppercase tracking-[0.2em] leading-tight">Listing Pipeline Status</h2>
+                    <span className="text-[8px] font-black uppercase opacity-60 text-right max-w-[50%]">
                       {isSubscriber ? 'Auto-Renewal Enabled' : 'Manual Renewal Required (30 Days)'}
                     </span>
                   </div>
@@ -631,15 +720,48 @@ export default function Profile({
                   <div className="bg-zinc-900 border-2 border-zinc-800 p-4 space-y-4">
                     <h4 className="text-[10px] font-black uppercase text-brand-teal tracking-widest">Basic Profile</h4>
                     <div className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="group">
+                          <label className="text-[10px] font-black uppercase text-zinc-400 tracking-[0.2em] mb-1 block">First Name</label>
+                          <input 
+                            type="text" 
+                            value={profileEditData.firstName}
+                            onChange={e => setProfileEditData({...profileEditData, firstName: e.target.value})}
+                            className="brutalist-input h-10 text-xs bg-zinc-800 border-zinc-700 text-white w-full placeholder:text-zinc-600"
+                            placeholder="e.g. John"
+                          />
+                        </div>
+                        <div className="group">
+                          <label className="text-[10px] font-black uppercase text-zinc-400 tracking-[0.2em] mb-1 block">Last Name</label>
+                          <input 
+                            type="text" 
+                            value={profileEditData.lastName}
+                            onChange={e => setProfileEditData({...profileEditData, lastName: e.target.value})}
+                            className="brutalist-input h-10 text-xs bg-zinc-800 border-zinc-700 text-white w-full placeholder:text-zinc-600"
+                            placeholder="e.g. Doe"
+                          />
+                        </div>
+                      </div>
                       <div className="group">
-                        <label className="text-[10px] font-black uppercase text-zinc-400 tracking-[0.2em] mb-1 block">Full Display Name</label>
+                        <label className="text-[10px] font-black uppercase text-zinc-400 tracking-[0.2em] mb-1 block flex justify-between">
+                          <span>Unique Display Name</span>
+                          {isCheckingName && <span className="text-zinc-500">Checking...</span>}
+                          {!isCheckingName && nameAvailable === true && <span className="text-brand-teal">Available</span>}
+                          {!isCheckingName && nameAvailable === false && <span className="text-red-500">Taken</span>}
+                        </label>
                         <input 
                           type="text" 
                           value={profileEditData.name}
                           onChange={e => setProfileEditData({...profileEditData, name: e.target.value})}
-                          className="brutalist-input h-10 text-xs bg-zinc-800 border-zinc-700 text-white w-full placeholder:text-zinc-600"
+                          className={cn(
+                            "brutalist-input h-10 text-xs bg-zinc-800 border-zinc-700 text-white w-full placeholder:text-zinc-600",
+                            nameError ? "border-red-500" : ""
+                          )}
                           placeholder="e.g. John Doe"
                         />
+                        {nameError && (
+                          <p className="text-[10px] text-red-500 mt-1">{nameError}</p>
+                        )}
                       </div>
                       <div className="group">
                         <label className="text-[10px] font-black uppercase text-zinc-400 tracking-[0.2em] mb-1 block">Phone Number</label>
@@ -697,23 +819,66 @@ export default function Profile({
                       <div className="flex flex-col items-center gap-3">
                         <div className="w-24 h-24 bg-brand-teal border-4 border-brand-black overflow-hidden shadow-brutal-sm">
                           <img 
-                            src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${avatarPreview}&gender=${profileEditData.gender === 'Female' ? 'female' : 'male'}`} 
+                            src={getUserAvatarUrl(profileEditData, avatarPreview)} 
                             alt="Preview" 
                             className="w-full h-full"
+                            referrerPolicy="no-referrer"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(profileEditData.name)}&background=2bdctb&color=000`;
+                            }}
                           />
                         </div>
-                        <div className="text-center">
+                        <div className="text-center w-full">
                            <p className="text-[8px] font-black uppercase text-zinc-500 mb-1">Rolls: {rollsUsed}/{isSubscriber ? '∞' : '1'}</p>
-                           <button 
-                             disabled={!isSubscriber && rollsUsed >= 1}
-                             onClick={() => {
-                               setAvatarPreview(Math.random().toString(36).substring(7));
-                               setRollsUsed(prev => prev + 1);
-                             }}
-                             className="bg-white text-brand-black px-3 py-1 text-[9px] font-black uppercase border-2 border-brand-black shadow-brutal-xs disabled:opacity-50"
-                           >
-                             Roll Avatar
-                           </button>
+                           <div className="flex flex-col gap-2 w-full">
+                             <button 
+                               disabled={!isSubscriber && rollsUsed >= 1}
+                               onClick={() => {
+                                 setAvatarPreview(Math.random().toString(36).substring(7));
+                                 setProfileEditData({...profileEditData, avatarTier: 'Standard', avatarSeed: Math.random().toString(36).substring(7)});
+                                 setRollsUsed(prev => prev + 1);
+                               }}
+                               className="w-full bg-white text-brand-black px-2 py-1 text-[9px] font-black uppercase border-2 border-brand-black shadow-brutal-xs disabled:opacity-50 flex items-center justify-center"
+                             >
+                               <Dices size={12} className="inline mr-1" /> Basic
+                             </button>
+                             <button 
+                               disabled={!isSubscriber}
+                               onClick={() => {
+                                 if (!isSubscriber) return;
+                                 setAvatarPreview(Math.random().toString(36).substring(7));
+                                 setProfileEditData({...profileEditData, avatarTier: 'Epic', avatarSeed: Math.random().toString(36).substring(7)});
+                                 setRollsUsed(prev => prev + 1);
+                               }}
+                               className={cn(
+                                 "w-full px-2 py-1 text-[9px] font-black uppercase border-2 flex items-center justify-center transition-colors relative group",
+                                 isSubscriber 
+                                   ? "text-purple-400 bg-zinc-900 border-purple-500 hover:bg-purple-500 hover:text-white" 
+                                   : "text-zinc-500 bg-zinc-800 border-zinc-700 cursor-not-allowed opacity-70"
+                               )}
+                             >
+                               {!isSubscriber && <Lock size={10} className="mr-1" />}
+                               <Dices size={12} className="inline mr-1" /> Epic
+                             </button>
+                             <button 
+                               disabled={!isSubscriber}
+                               onClick={() => {
+                                 if (!isSubscriber) return;
+                                 setAvatarPreview(Math.random().toString(36).substring(7));
+                                 setProfileEditData({...profileEditData, avatarTier: 'Legendary', avatarSeed: Math.random().toString(36).substring(7)});
+                                 setRollsUsed(prev => prev + 1);
+                               }}
+                               className={cn(
+                                 "w-full px-2 py-1 text-[9px] font-black uppercase border-2 flex items-center justify-center transition-colors relative group",
+                                 isSubscriber 
+                                   ? "text-amber-400 bg-zinc-900 border-amber-500 hover:bg-amber-500 hover:text-white" 
+                                   : "text-zinc-500 bg-zinc-800 border-zinc-700 cursor-not-allowed opacity-70"
+                               )}
+                             >
+                               {!isSubscriber && <Lock size={10} className="mr-1" />}
+                               <Dices size={12} className="inline mr-1" /> Legendary
+                             </button>
+                           </div>
                         </div>
                       </div>
                       
@@ -778,31 +943,6 @@ export default function Profile({
                         </div>
                       </div>
                     </div>
-                    
-                    {isSubscriber && (
-                      <div className="flex gap-2 pt-2 border-t border-zinc-800">
-                        <button 
-                          onClick={() => {
-                            setAvatarPreview(`epic-${Math.random().toString(36).substring(7)}`);
-                            setRollsUsed(prev => prev + 1);
-                          }}
-                          className="flex-1 bg-amber-400 text-brand-black px-2 py-1.5 text-[9px] font-black uppercase rounded shadow-brutal-xs flex items-center justify-center gap-1 active:translate-y-0.5"
-                        >
-                          <Zap size={12} className="fill-brand-black" />
-                          Epic Roll ({user.avatarRolls?.epic || 0})
-                        </button>
-                        <button 
-                          onClick={() => {
-                            setAvatarPreview(`legendary-${Math.random().toString(36).substring(7)}`);
-                            setRollsUsed(prev => prev + 1);
-                          }}
-                          className="flex-1 bg-brand-teal text-brand-black px-2 py-1.5 text-[9px] font-black uppercase rounded shadow-brutal-xs flex items-center justify-center gap-1 active:translate-y-0.5"
-                        >
-                          <Award size={12} />
-                          Legendary ({user.avatarRolls?.legendary || 0})
-                        </button>
-                      </div>
-                    )}
                   </div>
 
                   {/* Online Hours Selector */}
@@ -840,7 +980,7 @@ export default function Profile({
                          <div className="flex-1">
                             <label className="text-[8px] font-black text-zinc-600 uppercase mb-1 block">Open</label>
                             <select 
-                              className="w-full bg-zinc-800 border border-zinc-700 text-white text-xs p-2 h-10"
+                              className="w-full bg-[#d8f1e9] border border-zinc-700 text-[#060606] text-xs p-2 h-10"
                               value={profileEditData.onlineHours.split('|')[1]?.split('-')[0] || '09:00'}
                               onChange={(e) => {
                                 const [days, times] = profileEditData.onlineHours.split('|');
@@ -858,7 +998,7 @@ export default function Profile({
                          <div className="flex-1">
                             <label className="text-[8px] font-black text-zinc-600 uppercase mb-1 block">Close</label>
                             <select 
-                              className="w-full bg-zinc-800 border border-zinc-700 text-white text-xs p-2 h-10"
+                              className="w-full bg-[#d8f1e9] border border-zinc-700 text-[#0d0d0d] text-xs p-2 h-10"
                               value={profileEditData.onlineHours.split('|')[1]?.split('-')[1] || '17:00'}
                               onChange={(e) => {
                                 const [days, times] = profileEditData.onlineHours.split('|');
@@ -982,17 +1122,19 @@ export default function Profile({
 
                 <div className="mt-8">
                   <button 
+                    disabled={!!nameError || isCheckingName || !profileEditData.name || !profileEditData.firstName || !profileEditData.lastName}
                     onClick={() => {
                       onUpdateUser({
                         ...profileEditData,
                         avatarSeed: profileEditData.avatarSeed || avatarPreview,
-                        profileScore: Math.min(100, user.profileScore + 10)
+                        avatarUrl: getUserAvatarUrl(profileEditData, avatarPreview),
+                        profileScore: Math.min(100, (user.profileScore || 0) + 10)
                       });
                       setActiveView('main');
                     }}
-                    className="brutalist-button-teal w-full py-4 text-xs font-black uppercase shadow-brutal-sm active:translate-y-1 active:shadow-none"
+                    className="brutalist-button-teal w-full py-4 text-xs font-black uppercase shadow-brutal-sm active:translate-y-1 active:shadow-none disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    DEPLOY ALL CHANGES
+                    {isCheckingName ? 'VERIFYING...' : 'DEPLOY ALL CHANGES'}
                   </button>
                 </div>
               </div>
@@ -1101,9 +1243,13 @@ export default function Profile({
           <div className="relative group">
             <div className="w-24 h-24 bg-brand-teal border-4 border-brand-black dark:border-zinc-700 overflow-hidden shadow-brutal-sm group-hover:-translate-x-1 group-hover:-translate-y-1 transition-all">
               <img 
-                src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.avatarSeed || user.name}&gender=${user.gender === 'Female' ? 'female' : 'male'}`} 
+                src={getUserAvatarUrl(user)} 
                 alt="Profile" 
                 className="w-full h-full"
+                referrerPolicy="no-referrer"
+                onError={(e) => {
+                   (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=2bdctb&color=000`;
+                }}
               />
             </div>
           </div>
@@ -1194,6 +1340,39 @@ export default function Profile({
         </div>
       </section>
 
+      {/* Anonymous User Upgrade Banner */}
+      {user.isGuest && (
+        <motion.div 
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-brand-teal/5 border-l-8 border-brand-teal p-4 flex flex-col gap-4 mb-4"
+        >
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-brand-teal text-brand-black rotate-6 shadow-brutal-xs">
+              <Zap size={20} className="fill-brand-black" />
+            </div>
+            <div>
+              <p className="text-xs font-display font-black uppercase dark:text-gray-100">Guest Mode: Save Your Progress</p>
+              <p className="text-[9px] font-bold text-zinc-500 uppercase tracking-tight">Create a permanent account to keep your properties and listings safe.</p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button 
+              onClick={() => signInWithGoogle()}
+              className="brutalist-button-white py-2 px-4 text-[10px] h-auto flex-1 flex items-center justify-center gap-2 font-black"
+            >
+              <Mail size={12} /> Link Google
+            </button>
+            <button 
+              onClick={() => signInWithFacebook()}
+              className="brutalist-button-white py-2 px-4 text-[10px] h-auto flex-1 flex items-center justify-center gap-2 border-brand-black font-black"
+            >
+              <Facebook size={12} /> Link Facebook
+            </button>
+          </div>
+        </motion.div>
+      )}
+
       {/* KYC Alert Banner */}
       {user.kycStatus !== 'Verified' && (
         <motion.div 
@@ -1238,8 +1417,7 @@ export default function Profile({
       {/* List Options */}
       <section className="flex flex-col gap-2">
         <h3 className="text-xs font-display font-black uppercase text-zinc-400 tracking-widest pl-2">Personal Management</h3>
-        <div className="brutalist-card p-2 flex flex-col divide-y-2 divide-zinc-100">
-          <ListOption icon={<PlusCircle size={18} />} label="My Listings" onClick={() => handleAction('My Listings')} />
+        <div className="brutalist-card p-2 flex flex-col divide-y-2 divide-zinc-100 dark:divide-zinc-800">
           <ListOption icon={<Heart size={18} />} label="Saved Properties" onClick={() => handleAction('Saved Properties')} />
           <ListOption icon={<History size={18} />} label="Viewed History" onClick={() => handleAction('Viewed History')} />
           <ListOption icon={<Bell size={18} />} label="Price Alerts" badge="05" onClick={() => handleAction('Price Alerts')} />
@@ -1355,8 +1533,30 @@ export default function Profile({
                           <div className="space-y-4">
                             <h4 className="text-xs font-display font-black uppercase italic text-brand-teal">Stage 1: Basic Intelligence</h4>
                             <div className="space-y-3">
+                              <div className="grid grid-cols-2 gap-3">
+                                <div className="group">
+                                  <label className="text-[8px] font-black uppercase text-zinc-400 tracking-widest mb-1 block">First Name</label>
+                                  <input 
+                                    type="text" 
+                                    value={profileEditData.firstName}
+                                    onChange={e => setProfileEditData({...profileEditData, firstName: e.target.value})}
+                                    className="brutalist-input h-10 text-xs w-full bg-white"
+                                    placeholder="Legal First Name"
+                                  />
+                                </div>
+                                <div className="group">
+                                  <label className="text-[8px] font-black uppercase text-zinc-400 tracking-widest mb-1 block">Last Name</label>
+                                  <input 
+                                    type="text" 
+                                    value={profileEditData.lastName}
+                                    onChange={e => setProfileEditData({...profileEditData, lastName: e.target.value})}
+                                    className="brutalist-input h-10 text-xs w-full bg-white"
+                                    placeholder="Legal Last Name"
+                                  />
+                                </div>
+                              </div>
                               <div className="group">
-                                <label className="text-[8px] font-black uppercase text-zinc-400 tracking-widest mb-1 block">Full Name (Legal)</label>
+                                <label className="text-[8px] font-black uppercase text-zinc-400 tracking-widest mb-1 block">Display Name</label>
                                 <input 
                                   type="text" 
                                   value={profileEditData.name}

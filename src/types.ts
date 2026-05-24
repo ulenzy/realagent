@@ -111,11 +111,13 @@ export interface ListingRequest {
   commission?: number;
   acceptsDownPayment?: boolean;
   documents?: { name: string; fileType: string; fileName: string }[];
+  googlePinLink?: string;
   metrics?: {
     views: number;
     saves: number;
     inquiries: number;
   };
+  trustScore?: number;
 }
 
 export interface Message {
@@ -151,11 +153,20 @@ export interface Transaction {
 
 export interface User {
   id: string;
-  name: string;
+  name: string; // The unique display name
+  firstName?: string;
+  lastName?: string;
   email: string;
   phoneNumber?: string;
   bio?: string;
   avatarSeed?: string;
+  avatarUrl?: string;
+  avatarTier?: 'Standard' | 'Epic' | 'Legendary';
+  avatarOptions?: {
+    hairStyle: string;
+    hairColor: string;
+    headwear: string;
+  };
   savedProperties: string[];
   isAgent: boolean;
   isSubscriber: boolean;
@@ -172,10 +183,12 @@ export interface User {
   linkedin?: string;
   onlineHours?: string;
   specializationArea?: string;
+  isGuest?: boolean;
   avatarRolls?: {
     regular: number;
     epic: number;
     legendary: number;
     lastSubscriptionDate?: string;
   };
+  onboardingCompleted?: boolean;
 }

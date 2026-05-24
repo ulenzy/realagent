@@ -1,0 +1,66 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Default Deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- User Profiles ---
+    match /users/{userId} {
+      function isValidUser(data) {
+        return data.keys().hasAll(['id', 'email', 'name']) 
+               && data.id == request.auth.uid
+               && data.email is string && data.email.size() <= 256
+               && data.name is string && data.name.size() <= 100;
+      }
+
+      allow get: if isOwner(userId);
+      allow list: if isSignedIn() && resource.data.name != null; // Added to allow name checks query
+      allow create: if isSignedIn() && isValidId(userId) && isOwner(userId) && isValidUser(incoming());
+      allow update: if isOwner(userId) && isValidUser(incoming())
+                      && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'firstName', 'lastName', 'phoneNumber', 'isAgent', 'role', 'savedProperties', 'tokens', 'bio', 'avatarSeed', 'avatarUrl', 'avatarTier', 'avatarOptions', 'profileScore', 'rating', 'totalReviews', 'preferredLocations', 'gender', 'linkedin', 'onlineHours', 'specializationArea', 'isSubscriber', 'kycStatus', 'kycDocuments', 'isGuest', 'avatarRolls', 'transactions', 'onboardingCompleted']);
+      allow delete: if isOwner(userId);
+    }
+
+    // --- Property Listings ---
+    match /properties/{propertyId} {
+      function isValidProperty(data) {
+        return data.keys().hasAll(['id', 'ownerId', 'title', 'price'])
+               && data.ownerId == request.auth.uid
+               && data.title is string && data.title.size() <= 200
+               && data.price is number && data.price >= 0;
+      }
+
+      // Enforce: Users can only read, update, or delete records they created
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow get: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      
+      allow create: if isSignedIn() && isValidId(propertyId) && isValidProperty(incoming());
+      allow update: if isSignedIn() && isOwner(existing().ownerId) && isValidProperty(incoming())
+                      && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'price', 'type', 'estateName', 'location', 'image', 'status', 'description']);
+      allow delete: if isSignedIn() && isOwner(existing().ownerId);
+    }
+  }
+}

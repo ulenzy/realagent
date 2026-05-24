@@ -5,13 +5,11 @@ import { cn } from '../lib/utils';
 import { allAgents, mockProperties } from '../data/mockListings';
 import { Property } from '../types';
 
-interface AgentProfileProps {
-  agentId: string;
-  onBack: () => void;
-  onSelectProperty: (id: string) => void;
-}
+import { useNavigation } from '../context/NavigationContext';
 
-export default function AgentProfile({ agentId, onBack, onSelectProperty }: AgentProfileProps) {
+export default function AgentProfile() {
+  const { selectedAgentId: agentId, handleBackToMarketplace: onBack, handleSelectProperty: onSelectProperty } = useNavigation();
+  
   const agent = allAgents.find(a => a.id === agentId);
   const agentProperties = mockProperties.filter(p => p.agent.id === agentId);
 
@@ -81,57 +79,79 @@ export default function AgentProfile({ agentId, onBack, onSelectProperty }: Agen
                 )}
               </div>
               
-              <p className="text-lg text-brand-black dark:text-zinc-300 font-bold mb-4">
-                {agent.specialization}
-              </p>
-              
-              <p className="text-sm text-zinc-700 dark:text-zinc-300 mb-6 leading-relaxed max-w-2xl">
-                {agent.bio || `${agent.name} is a top-rated real estate professional with years of experience in the Nigerian property market.`}
-              </p>
+              <div className="flex flex-col gap-6 mb-8">
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <div className="h-4 w-1 bg-brand-teal" />
+                    <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400 leading-none">Core Expertise</h3>
+                  </div>
+                  <div className="flex flex-wrap gap-3">
+                    {agent.specialization.split(/[,&]|\s+and\s+/i).map(s => s.trim()).filter(Boolean).map((spec, idx) => (
+                      <motion.span 
+                        key={spec}
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: 0.1 + (idx * 0.05) }}
+                        className="px-3 py-1.5 bg-brand-teal text-brand-black text-[11px] font-black uppercase border-2 border-brand-black dark:border-zinc-700 shadow-brutal-sm hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all cursor-default"
+                      >
+                        {spec}
+                      </motion.span>
+                    ))}
+                  </div>
+                </div>
 
-              {/* Enhanced Display for Locations and Hours */}
-              <div className="flex flex-col gap-4 mb-6">
-                {(agent as any).preferredLocations && (agent as any).preferredLocations.length > 0 && (
-                  <div className="flex flex-col gap-2">
-                    <span className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400">Area of Concentration:</span>
-                    <div className="flex flex-wrap gap-2">
-                       {(agent as any).preferredLocations.map((loc: string) => (
-                         <button 
-                           key={loc}
-                           className="px-2 py-1 bg-brand-teal/10 border border-brand-teal/30 hover:bg-brand-teal hover:text-brand-black transition-all text-[9px] font-black uppercase text-brand-teal"
-                         >
-                           {loc}
-                         </button>
-                       ))}
+                {agent.specializationArea && (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2">
+                      <div className="h-4 w-1 bg-zinc-400 dark:bg-zinc-600" />
+                      <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400 leading-none">Operational Territory</h3>
+                    </div>
+                    <div className="flex flex-wrap gap-3">
+                      {agent.specializationArea.split(',').map(a => a.trim()).filter(Boolean).map((area, idx) => (
+                        <motion.span 
+                          key={area}
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: 0.3 + (idx * 0.05) }}
+                          className="px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 text-brand-black dark:text-white text-[11px] font-black uppercase border-2 border-brand-black dark:border-zinc-700 shadow-brutal-xs flex items-center gap-1.5"
+                        >
+                          <MapPin className="w-3 h-3 text-brand-teal" />
+                          {area}
+                        </motion.span>
+                      ))}
                     </div>
                   </div>
                 )}
+              </div>
+              
+              <p className="text-sm text-zinc-700 dark:text-zinc-300 mb-8 leading-relaxed max-w-2xl border-l-4 border-zinc-100 dark:border-zinc-800 pl-4 italic">
+                "{agent.bio || `${agent.name} is a top-rated real estate professional with years of experience in the Nigerian property market.`}"
+              </p>
 
-                <div className="flex flex-wrap gap-x-6 gap-y-3 bg-brand-gray/30 dark:bg-zinc-800/50 p-4 border-l-4 border-brand-teal">
-                  <div className="flex items-center gap-2">
-                     <Clock className="w-3.5 h-3.5 text-brand-teal" />
-                     <span className="text-[10px] font-black uppercase text-zinc-600 dark:text-zinc-300">
-                       {agent.onlineHours?.includes('|') 
-                         ? `Available: ${agent.onlineHours.split('|')[0]} (${agent.onlineHours.split('|')[1]})`
-                         : agent.onlineHours || 'Contact for hours'
-                       }
-                     </span>
-                  </div>
-                  {agent.linkedin && (
-                    <a 
-                      href={agent.linkedin} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-2 hover:text-brand-teal transition-colors"
-                    >
-                       <ExternalLink className="w-3.5 h-3.5 text-brand-teal" />
-                       <span className="text-[10px] font-black uppercase text-zinc-600 dark:text-zinc-300">LinkedIn Profile</span>
-                    </a>
-                  )}
+              <div className="flex flex-wrap gap-x-6 gap-y-3 bg-brand-gray/30 dark:bg-zinc-800/50 p-4 border-l-4 border-brand-teal mt-6">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-3.5 h-3.5 text-brand-teal" />
+                  <span className="text-[10px] font-black uppercase text-zinc-600 dark:text-zinc-300">
+                    {agent.onlineHours?.includes('|') 
+                      ? `Available: ${agent.onlineHours.split('|')[0]} (${agent.onlineHours.split('|')[1]})`
+                      : agent.onlineHours || 'Contact for hours'
+                    }
+                  </span>
                 </div>
+                {agent.linkedin && (
+                  <a 
+                    href={agent.linkedin} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 hover:text-brand-teal transition-colors"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5 text-brand-teal" />
+                    <span className="text-[10px] font-black uppercase text-zinc-600 dark:text-zinc-300">LinkedIn Profile</span>
+                  </a>
+                )}
               </div>
 
-              <div className="flex flex-wrap gap-4 items-center justify-center md:justify-start">
+              <div className="flex flex-wrap gap-4 items-center justify-center md:justify-start mt-8">
                 <button 
                   onClick={handleContact}
                   className="px-6 py-3 bg-brand-black text-white hover:bg-brand-teal hover:text-brand-black font-black uppercase tracking-wide border-2 border-brand-black shadow-brutal transition-all flex items-center gap-2"

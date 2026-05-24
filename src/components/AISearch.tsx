@@ -16,7 +16,11 @@ interface Message {
   recommendations?: typeof mockProperties;
 }
 
-export default function AISearch({ onSelectProperty }: { onSelectProperty: (id: string) => void }) {
+import { useNavigation } from '../context/NavigationContext';
+
+export default function AISearch() {
+  const { handleSelectProperty: onSelectProperty } = useNavigation();
+
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',

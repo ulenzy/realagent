@@ -6,12 +6,13 @@ import { ArrowLeft } from 'lucide-react';
 
 import { ListingRequest } from '../types';
 
-interface ListPropertyFlowProps {
-  onBack: () => void;
-  onSubmit: (request: Omit<ListingRequest, 'id' | 'status' | 'submittedAt' | 'lastUpdated'>) => void;
-}
+import { useAuth } from '../context/AuthContext';
+import { useNavigation } from '../context/NavigationContext';
 
-export default function ListPropertyFlow({ onBack, onSubmit }: ListPropertyFlowProps) {
+export default function ListPropertyFlow() {
+  const { addListingRequest: onSubmit } = useAuth();
+  const { handleBackToMarketplace: onBack, setIsListingFlow } = useNavigation();
+
   const [showModal, setShowModal] = useState(true);
   const [hasAgreed, setHasAgreed] = useState(false);
 
@@ -23,7 +24,7 @@ export default function ListPropertyFlow({ onBack, onSubmit }: ListPropertyFlowP
   const handleCloseModal = () => {
     setShowModal(false);
     if (!hasAgreed) {
-      onBack();
+      setIsListingFlow(false);
     }
   };
 
@@ -60,7 +61,7 @@ export default function ListPropertyFlow({ onBack, onSubmit }: ListPropertyFlowP
               </button>
             </motion.div>
           ) : (
-            <ListingForm onBack={onBack} onSubmit={onSubmit} />
+            <ListingForm />
           )}
         </AnimatePresence>
       </div>

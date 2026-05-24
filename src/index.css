@@ -43,6 +43,10 @@
   @apply w-full bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 p-4 h-14 font-black uppercase text-xs tracking-widest focus:outline-none focus:bg-brand-teal/5 focus:border-brand-teal transition-all;
 }
 
+.brutalist-input-small {
+  @apply w-full bg-white dark:bg-zinc-900 border-2 border-brand-black dark:border-zinc-700 p-2 h-10 font-bold text-xs focus:outline-none focus:border-brand-teal transition-all;
+}
+
 .brutalist-button {
   @apply bg-brand-teal text-brand-black border-2 border-brand-black font-display font-black uppercase py-4 px-8 shadow-brutal-sm active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all flex items-center justify-center gap-2 dark:border-zinc-700 dark:shadow-[2px_2px_0px_0px_#52525b];
 }

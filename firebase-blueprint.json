@@ -1,0 +1,68 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "firstName": { "type": "string" },
+        "lastName": { "type": "string" },
+        "email": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "bio": { "type": "string" },
+        "avatarSeed": { "type": "string" },
+        "avatarUrl": { "type": "string" },
+        "avatarTier": { "type": "string" },
+        "isAgent": { "type": "boolean" },
+        "isSubscriber": { "type": "boolean" },
+        "role": { "type": "string" },
+        "preferredLocations": { "type": "array" },
+        "gender": { "type": "string" },
+        "linkedin": { "type": "string" },
+        "onlineHours": { "type": "string" },
+        "specializationArea": { "type": "string" },
+        "kycStatus": { "type": "string" },
+        "kycDocuments": { "type": "array" },
+        "profileScore": { "type": "number" },
+        "rating": { "type": "number" },
+        "totalReviews": { "type": "number" },
+        "tokens": { "type": "number" },
+        "transactions": { "type": "array" },
+        "isGuest": { "type": "boolean" },
+        "savedProperties": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "email", "name"]
+    },
+    "Property": {
+      "title": "Property",
+      "description": "Real estate listing",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "title": { "type": "string" },
+        "price": { "type": "number" },
+        "type": { "type": "string" },
+        "estateName": { "type": "string" },
+        "location": { "type": "object" },
+        "image": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "title", "price"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "Authenticated user profiles"
+    },
+    "properties/{propertyId}": {
+      "schema": "Property",
+      "description": "Marketplace property listings"
+    }
+  }
+}

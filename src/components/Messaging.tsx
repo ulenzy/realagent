@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { MessageCircle, X, Send, Search, ArrowLeft, MoreVertical, CheckCheck, MapPin, ExternalLink, Lock } from 'lucide-react';
+import { MessageCircle, X, Send, Search, ArrowLeft, MoreVertical, CheckCheck, MapPin, ExternalLink, Lock, Smile } from 'lucide-react';
+import EmojiPicker, { Theme } from 'emoji-picker-react';
 import { cn } from '../lib/utils';
 import { ChatSession, Message } from '../types';
 
@@ -12,6 +13,20 @@ interface MessagingProps {
 
 export default function Messaging({ isOpen, onClose, initialChatId }: MessagingProps) {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(initialChatId || null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  
+  // Close emoji picker when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (pickerRef.current && !pickerRef.current.contains(event.target as Node)) {
+        setShowEmojiPicker(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   const [sessions, setSessions] = useState<ChatSession[]>([
     {
       id: 'session-1',
@@ -132,11 +147,14 @@ export default function Messaging({ isOpen, onClose, initialChatId }: MessagingP
   const handleSendMessage = () => {
     if (!newMessage.trim() || !activeSessionId) return;
 
+    // Mask numbers: replace any sequence of digits with '###'
+    const maskedText = newMessage.replace(/\d+/g, '###');
+
     const msg: Message = {
       id: `m-${Date.now()}`,
       senderId: 'user-1',
       receiverId: sessions.find(s => s.id === activeSessionId)?.participant.id || '',
-      text: newMessage,
+      text: maskedText,
       timestamp: new Date().toISOString()
     };
 
@@ -146,10 +164,15 @@ export default function Messaging({ isOpen, onClose, initialChatId }: MessagingP
     }));
 
     setSessions(prev => prev.map(s => 
-      s.id === activeSessionId ? { ...s, lastMessage: newMessage, lastTimestamp: new Date().toISOString() } : s
+      s.id === activeSessionId ? { ...s, lastMessage: maskedText, lastTimestamp: new Date().toISOString() } : s
     ));
 
     setNewMessage('');
+    setShowEmojiPicker(false);
+  };
+
+  const onEmojiClick = (emojiData: any) => {
+    setNewMessage(prev => prev + emojiData.emoji);
   };
 
   const activeSession = sessions.find(s => s.id === activeSessionId);
@@ -173,7 +196,7 @@ export default function Messaging({ isOpen, onClose, initialChatId }: MessagingP
             initial={{ x: '100%' }}
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
-            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+            transition={{ type: 'spring', stiffness: 450, damping: 35 }}
             className="fixed top-0 right-0 h-full w-full md:w-[450px] bg-brand-gray dark:bg-[#1c1c21] z-[70] border-l-4 border-brand-black dark:border-zinc-800 shadow-2xl flex flex-col"
           >
             {/* Header */}
@@ -364,8 +387,36 @@ export default function Messaging({ isOpen, onClose, initialChatId }: MessagingP
                     </div>
 
                     {/* Chat Input */}
-                    <div className="p-4 bg-white dark:bg-zinc-900 border-t-2 border-brand-black dark:border-zinc-800">
+                    <div className="p-4 bg-white dark:bg-zinc-900 border-t-2 border-brand-black dark:border-zinc-800 relative">
+                      <AnimatePresence>
+                        {showEmojiPicker && (
+                          <div ref={pickerRef} className="absolute bottom-full right-4 mb-2 z-[80]">
+                            <motion.div
+                              initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                              animate={{ opacity: 1, y: 0, scale: 1 }}
+                              exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                            >
+                              <EmojiPicker 
+                                onEmojiClick={onEmojiClick} 
+                                theme={Theme.AUTO}
+                                width={320}
+                                height={400}
+                              />
+                            </motion.div>
+                          </div>
+                        )}
+                      </AnimatePresence>
+                      
                       <div className="flex gap-2">
+                        <button 
+                          onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                          className={cn(
+                            "brutalist-button-white px-3 flex items-center justify-center transition-colors",
+                            showEmojiPicker && "bg-brand-teal"
+                          )}
+                        >
+                          <Smile size={18} />
+                        </button>
                         <input 
                           type="text" 
                           placeholder="Type a message..."

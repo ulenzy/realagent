@@ -12,33 +12,31 @@ import { mockProperties } from '../data/mockListings';
 import InteractiveMap from './InteractiveMap';
 import ComparisonTable from './ComparisonTable';
 
-interface PropertyDetailProps {
-  property: Property;
-  onBack: () => void;
-  onNavigateToProperty: (id: string) => void;
-  onViewAgentProfile?: (id: string) => void;
-  savedProperties?: string[];
-  onToggleSave?: (id: string) => void;
-}
+import { useAuth } from '../context/AuthContext';
+import { useNavigation } from '../context/NavigationContext';
 
 export default function PropertyDetail({ 
-  property, 
-  onBack, 
-  onNavigateToProperty, 
-  onViewAgentProfile, 
-  savedProperties = [], 
-  onToggleSave,
-  user
-}: PropertyDetailProps & { user: any }) {
+  property
+}: { 
+  property: Property;
+}) {
+  const { user, savedProperties, toggleSavedProperty } = useAuth();
+  const { handleBackToMarketplace: onBack, handleSelectProperty: onNavigateToProperty, setSelectedAgentId: onViewAgentProfile } = useNavigation();
+
+  if (!user) return null;
+
   const [selectedImage, setSelectedImage] = useState(0);
   const [showFloatingBar, setShowFloatingBar] = useState(true);
   const [selectedForCompare, setSelectedForCompare] = useState<string[]>([property.id]);
   const [showCompareTable, setShowCompareTable] = useState(false);
   const actionSectionRef = useRef<HTMLDivElement>(null);
 
+  const onToggleSave = toggleSavedProperty;
+
   // Reset comparison when main property changes
   useEffect(() => {
     setSelectedForCompare([property.id]);
+    setShowCompareTable(false);
   }, [property.id]);
   const isSaved = savedProperties.includes(property.id);
 
@@ -567,6 +565,7 @@ export default function PropertyDetail({
             initial={{ opacity: 0, y: 50 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 50 }}
+            transition={{ type: 'spring', stiffness: 450, damping: 35 }}
             className="fixed bottom-24 left-4 right-4 z-50 md:hidden"
           >
             <div className="bg-brand-black text-white p-4 border-4 border-white shadow-aggressive flex justify-between items-center gap-4">

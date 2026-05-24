@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useDeferredValue } from 'react';
 import { 
   Search, Filter, ArrowUpRight, ShieldCheck, MapPin, 
   TrendingUp, Info, Tag, X, ChevronDown, Check, 
@@ -51,7 +51,13 @@ const INITIAL_FILTERS: Filters = {
   verifiedAgent: false,
 };
 
-export default function Marketplace({ onSelectProperty, onViewAgentProfile, savedProperties = [], onToggleSave }: { onSelectProperty: (id: string) => void, onViewAgentProfile: (id: string) => void, savedProperties?: string[], onToggleSave?: (id: string) => void }) {
+import { useAuth } from '../context/AuthContext';
+import { useNavigation } from '../context/NavigationContext';
+
+export default function Marketplace() {
+  const { savedProperties, toggleSavedProperty: onToggleSave } = useAuth();
+  const { handleSelectProperty: onSelectProperty, setSelectedAgentId: onViewAgentProfile } = useNavigation();
+
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchSuggestions, setShowSearchSuggestions] = useState(false);
   const [recentSearches, setRecentSearches] = useState<string[]>(['Guzape', 'Land in Jahi', 'Duplex under 200M']);
@@ -105,9 +111,11 @@ export default function Marketplace({ onSelectProperty, onViewAgentProfile, save
     { id: 'furnished', label: 'Furnished', icon: <Layers size={14} /> },
   ];
 
+  const deferredSearchQuery = useDeferredValue(searchQuery);
+
   const searchSuggestions = useMemo(() => {
-    if (!searchQuery) return [];
-    const queries = searchQuery.toLowerCase();
+    if (!deferredSearchQuery) return [];
+    const queries = deferredSearchQuery.toLowerCase();
     const estates = [...new Set(mockProperties.map(p => p.estateName))].filter(e => e.toLowerCase().includes(queries));
     const locations = [...new Set(mockProperties.map(p => p.location.area))].filter(l => l.toLowerCase().includes(queries));
     const propertyTypes = [...new Set(mockProperties.map(p => p.type))].filter(t => t.toLowerCase().includes(queries));
@@ -117,7 +125,7 @@ export default function Marketplace({ onSelectProperty, onViewAgentProfile, save
       ...locations.map(l => ({ type: 'Location', value: l })),
       ...propertyTypes.map(p => ({ type: 'Property Type', value: p }))
     ].slice(0, 5);
-  }, [searchQuery]);
+  }, [deferredSearchQuery]);
 
   const toggleQuickFilter = (id: string) => {
     setSelectedQuickFilters(prev => 
@@ -127,9 +135,10 @@ export default function Marketplace({ onSelectProperty, onViewAgentProfile, save
 
   const filteredProperties = useMemo(() => {
     let result = mockProperties.filter(p => {
-      const matchesSearch = p.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                           p.location.area.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                           p.estateName.toLowerCase().includes(searchQuery.toLowerCase());
+      const qs = deferredSearchQuery.toLowerCase();
+      const matchesSearch = p.title.toLowerCase().includes(qs) || 
+                           p.location.area.toLowerCase().includes(qs) ||
+                           p.estateName.toLowerCase().includes(qs);
       
       const matchesPrice = p.price >= filters.priceRange[0] && p.price <= filters.priceRange[1];
       const matchesSize = p.sizeSqm >= filters.sizeRange[0] && p.sizeSqm <= filters.sizeRange[1];
@@ -336,7 +345,7 @@ export default function Marketplace({ onSelectProperty, onViewAgentProfile, save
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.9 }}
-                transition={{ duration: 0.2 }}
+                transition={{ type: 'spring', stiffness: 450, damping: 35 }}
               >
                 <PropertyCard 
                   property={property} 
