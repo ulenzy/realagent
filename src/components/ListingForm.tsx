@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
-import { Building2, MapPin, FileText, User, ArrowLeft, ArrowRight, CheckCircle2, Home, Landmark, Trees, Factory, Banknote, Map, Hash, Info, Phone, Mail, UserCircle, ShieldAlert } from 'lucide-react';
-import { cn, formatNumberString, parseFormattedNumber } from '../lib/utils';
+import React, { useState, useEffect } from 'react';
+import { Building2, MapPin, FileText, User, ArrowLeft, ArrowRight, CheckCircle2, Home, Landmark, Trees, Factory, Banknote, Map, Hash, Info, Phone, Mail, UserCircle, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { cn, formatNumberString, parseFormattedNumber, formatNumber } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { NIGERIAN_STATES, STATE_LGAS } from '../constants/locations';
 import { ListingRequest } from '../types';
+
+const PLATFORM_COMMISSION_RATE = 5; // 5% fixed — non-negotiable
 
 type PropertyType = 'House' | 'Apartment' | 'Commercial' | 'Land' | 'Industrial';
 
@@ -42,7 +44,6 @@ export default function ListingForm() {
     openToJV: false,
     jvSharingFormula: '',
     jvPremium: '',
-    commission: 0.5,
     // Legal & Contact
     documents: [] as string[],
     documentFiles: {} as Record<string, { fileType: string; fileName: string }>,
@@ -62,8 +63,51 @@ export default function ListingForm() {
     titleCompany: '',
     legalEncumbrances: '',
     nin: '',
-    faceVerification: ''
+    faceVerification: '',
+    listingRequirements: {
+      titleDocumentFileName: '',
+      titleDocumentFileType: '',
+      physicalConditionDescription: '',
+      photos: [] as string[],
+      locationPin: ''
+    }
   });
+
+  const [requirementsMet, setRequirementsMet] = useState(false);
+
+  useEffect(() => {
+    const reqs = formData.listingRequirements;
+    const isValidMaps = reqs.locationPin.startsWith('https://maps.google') || reqs.locationPin.startsWith('https://goo.gl');
+    const met = !!(
+      reqs.titleDocumentFileName &&
+      reqs.photos.length >= 3 &&
+      isValidMaps &&
+      reqs.physicalConditionDescription.length >= 100
+    );
+    setRequirementsMet(met);
+  }, [formData.listingRequirements]);
+
+  // Sync googlePinLink and locationPin
+  useEffect(() => {
+    if (formData.googlePinLink && !formData.listingRequirements.locationPin) {
+      setFormData(prev => ({
+        ...prev,
+        listingRequirements: {
+          ...prev.listingRequirements,
+          locationPin: prev.googlePinLink
+        }
+      }));
+    }
+  }, [formData.googlePinLink]);
+
+  useEffect(() => {
+    if (formData.listingRequirements.locationPin && formData.listingRequirements.locationPin !== formData.googlePinLink) {
+      setFormData(prev => ({
+        ...prev,
+        googlePinLink: prev.listingRequirements.locationPin
+      }));
+    }
+  }, [formData.listingRequirements.locationPin]);
 
   const getTrustScore = () => {
     let score = 0;
@@ -79,7 +123,7 @@ export default function ListingForm() {
     if (formData.address) score += 100;
     if (formData.estateName) score += 50;
     if (formData.flatNumber && formData.propertyType === 'Apartment') score += 25;
-    if (formData.googlePinLink) score += 150;
+    if (formData.googlePinLink || formData.listingRequirements.locationPin) score += 150;
     
     if (formData.propertyType === 'House' || formData.propertyType === 'Apartment') {
       if (formData.bedrooms) score += 50;
@@ -97,10 +141,30 @@ export default function ListingForm() {
     if (formData.parkingSpaces) score += 50;
     if (formData.amenities.length > 0) score += 100;
 
-    // Step 3 (max 1200)
-    score += Math.min(formData.documents.length * 400, 800); // 400 per doc, up to 2
-    if (formData.titleCompany) score += 200;
-    if (formData.legalEncumbrances) score += 200;
+    // Step 3 (Listing Requirements replacement points)
+    // Title document uploaded: +400 points
+    if (formData.listingRequirements.titleDocumentFileName) {
+      score += 400;
+    }
+    // Physical condition description (100+ chars): +200 points, +100 bonus at 200+ chars
+    const descLen = formData.listingRequirements.physicalConditionDescription.length;
+    if (descLen >= 100) {
+      score += 200;
+      if (descLen >= 200) {
+        score += 100;
+      }
+    }
+    // 3 photos uploaded: +200 points, +50 per additional photo (max +150 bonus)
+    const photoCount = formData.listingRequirements.photos.length;
+    if (photoCount >= 3) {
+      score += 200;
+      const extraPhotos = photoCount - 3;
+      score += Math.min(extraPhotos * 50, 150);
+    }
+    // Location pin provided: +200 points
+    if (formData.listingRequirements.locationPin) {
+      score += 200;
+    }
 
     // Step 4 (max 1000)
     if (formData.contactName) score += 100;
@@ -174,11 +238,12 @@ export default function ListingForm() {
         expiresAt: expirationDate.toISOString(),
         isBoosted: formData.isBoosted,
         isSubscriber: formData.isSubscriber,
-        commission: formData.commission,
+        commission: PLATFORM_COMMISSION_RATE,
         acceptsDownPayment: formData.acceptsDownPayment,
         furnishing: formData.furnishing,
         trustScore: getTrustScore(),
         googlePinLink: formData.googlePinLink,
+        listingRequirements: formData.listingRequirements,
         documents: formData.documents.map(d => ({
           name: d,
           ...formData.documentFiles[d]
@@ -225,6 +290,42 @@ export default function ListingForm() {
           }
         }));
       }
+    }
+  };
+
+  const handleTitleDocUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const extension = file.name.split('.').pop()?.toLowerCase() || '';
+      if (['jpg', 'jpeg', 'png', 'pdf'].includes(extension)) {
+        const mimeType = extension === 'pdf' ? 'application/pdf' : 'image/' + (extension === 'jpg' || extension === 'jpeg' ? 'jpeg' : extension);
+        setFormData(prev => ({
+          ...prev,
+          listingRequirements: {
+            ...prev.listingRequirements,
+            titleDocumentFileName: file.name,
+            titleDocumentFileType: mimeType
+          }
+        }));
+      }
+    }
+  };
+
+  const handlePhotosUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      const filesArray = Array.from(e.target.files) as File[];
+      const validFiles = filesArray.filter(file => {
+        const ext = file.name.split('.').pop()?.toLowerCase() || '';
+        return ['jpg', 'jpeg', 'png'].includes(ext);
+      });
+      const urls = validFiles.map(file => URL.createObjectURL(file));
+      setFormData(prev => ({
+        ...prev,
+        listingRequirements: {
+          ...prev.listingRequirements,
+          photos: [...prev.listingRequirements.photos, ...urls]
+        }
+      }));
     }
   };
 
@@ -298,7 +399,7 @@ export default function ListingForm() {
           <span className="text-[9px] font-black uppercase tracking-widest text-brand-teal italic">
             {step === 1 && "Category Select"}
             {step === 2 && "Core Specifics"}
-            {step === 3 && "Legal Verification"}
+            {step === 3 && "Listing Requirements"}
             {step === 4 && "Contact Identity"}
           </span>
         </div>
@@ -366,11 +467,9 @@ export default function ListingForm() {
                     key={p}
                     type="button"
                     onClick={() => {
-                      const isRent = p === 'Rent';
                       setFormData({
                         ...formData, 
-                        listingPurpose: p as 'Sale' | 'Rent',
-                        commission: isRent ? 10 : 0.5
+                        listingPurpose: p as 'Sale' | 'Rent'
                       });
                     }}
                     className={cn(
@@ -934,141 +1033,229 @@ export default function ListingForm() {
             exit={{ opacity: 0, x: -20 }}
             className="flex flex-col gap-6"
           >
-            <h2 className="text-3xl font-display font-black italic uppercase tracking-tighter">
-              Legal <span className="text-brand-teal">Verification</span>
+            <h2 className="text-3xl font-display font-black italic uppercase tracking-tighter flex items-center gap-2">
+              <ShieldCheck size={32} className="text-brand-teal" /> Listing <span className="text-brand-teal">Requirements</span>
             </h2>
-            <div className="flex justify-between items-end border-l-4 border-brand-teal pl-4">
-              <p className="text-xs text-zinc-500 font-medium italic">
-                Select at least 2 identifying documents. Upload JPEG, PNG or PDF. C of O and R of O are mutually exclusive.
-              </p>
-              <div className="text-[10px] font-black text-brand-teal uppercase text-right leading-tight">
-                <div>+400 pts</div>
-                <div className="text-zinc-500">Per Doc (Max 2)</div>
+
+            {/* Checklist Live Tracker */}
+            <div className="p-4 bg-brand-black text-white border-2 border-brand-teal shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] select-none">
+              <h3 className="text-xs font-display font-black uppercase text-brand-teal tracking-widest leading-none mb-3 flex items-center gap-2">
+                <ShieldCheck className="text-brand-teal shrink-0" size={16} /> LISTING REQUIREMENTS TRACKER
+              </h3>
+              <ul className="space-y-2">
+                {[
+                  {
+                    text: "Title Document — upload C of O, R of O, or equivalent",
+                    met: !!formData.listingRequirements.titleDocumentFileName
+                  },
+                  {
+                    text: "Property Photos — minimum 3 photos required",
+                    met: formData.listingRequirements.photos.length >= 3
+                  },
+                  {
+                    text: "Location Pin — valid Google Maps link",
+                    met: !!(formData.listingRequirements.locationPin && (formData.listingRequirements.locationPin.startsWith('https://maps.google') || formData.listingRequirements.locationPin.startsWith('https://goo.gl')))
+                  }
+                ].map((item, idx) => (
+                  <li key={idx} className="flex items-center gap-2 text-xs">
+                    <span className={cn(
+                      "w-5 h-5 flex items-center justify-center border text-[11px] font-black shrink-0",
+                      item.met ? "border-brand-teal bg-brand-teal/10 text-brand-teal" : "border-red-500 bg-red-500/10 text-red-500"
+                    )}>
+                      {item.met ? "✓" : "✗"}
+                    </span>
+                    <span className={cn(
+                      "font-semibold",
+                      item.met ? "text-zinc-400 line-through" : "text-white"
+                    )}>{item.text}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Section 1 — Title Document */}
+            <div className="brutalist-card-flat p-4 bg-zinc-50 dark:bg-zinc-900/50 space-y-3">
+              <label className="block">
+                <span className="block text-xs font-black uppercase text-zinc-900 dark:text-zinc-100 tracking-wider">
+                  Title Document <span className="text-red-500">*</span>
+                </span>
+                <span className="block text-[10px] uppercase text-zinc-500 font-bold leading-tight mt-0.5">
+                  Certificate of Occupancy, Right of Occupancy, Deed of Assignment, or equivalent
+                </span>
+              </label>
+              <div className="flex items-center gap-4">
+                <label className={cn(
+                  "flex-1 border-2 border-dashed p-4 flex flex-col items-center justify-center cursor-pointer transition-colors select-none",
+                  formData.listingRequirements.titleDocumentFileName 
+                    ? "bg-brand-teal/5 border-brand-teal" 
+                    : "bg-white dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                )}>
+                  <input 
+                    type="file" 
+                    className="hidden" 
+                    accept=".jpg,.jpeg,.png,.pdf" 
+                    onChange={handleTitleDocUpload} 
+                  />
+                  {formData.listingRequirements.titleDocumentFileName ? (
+                    <div className="text-center font-semibold text-xs">
+                      <span className="text-brand-teal font-black block mb-1">✓ TITLE UPLOADED</span>
+                      <span className="text-zinc-600 dark:text-zinc-300 block break-all font-mono">
+                        {formData.listingRequirements.titleDocumentFileName}
+                      </span>
+                      <span className="mt-1 inline-block bg-brand-teal text-brand-black text-[9px] font-black uppercase px-2 py-0.5">
+                        {formData.listingRequirements.titleDocumentFileType.split('/').pop()?.toUpperCase()}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="text-center">
+                      <span className="text-brand-teal text-xs font-black block uppercase">SELECT FILE</span>
+                      <span className="text-[10px] text-zinc-400 font-medium uppercase mt-0.5 block">JPG, PNG, PDF only</span>
+                    </div>
+                  )}
+                </label>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-4">
-              {[
-                { name: 'Certificate of Occupancy', desc: 'Direct state allocation' },
-                { name: 'Governor\'s Consent', desc: 'Verified transfer of title' },
-                { name: 'Right of Occupancy (R of O)', desc: 'Official grant of land use' },
-                { name: 'Survey Plan', desc: 'Registered physical coordinates' },
-                { name: 'Deed of Assignment', desc: 'Proof of purchase/transfer' },
-                { name: 'Title Deed Plan (TDP)', desc: 'Detailed site engineering data' },
-                { name: 'Allocation Letter', desc: 'Estate or government allotment' }
-              ].map((doc) => {
-                const isSelected = formData.documents.includes(doc.name);
-                const isUploaded = !!formData.documentFiles[doc.name];
-                
-                return (
-                  <div key={doc.name} className="flex flex-col">
-                    <label 
-                      className={cn(
-                        "flex flex-col gap-1 p-5 border-4 transition-all cursor-pointer shadow-brutal-sm relative group mb-1",
-                        isSelected
-                          ? "border-brand-teal bg-brand-teal/5 translate-x-1 translate-y-1 shadow-none" 
-                          : "border-brand-black dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800"
-                      )}
-                    >
-                      <input 
-                        type="checkbox" 
-                        className="hidden"
-                        checked={isSelected}
-                        onChange={() => handleDocumentToggle(doc.name)}
+            {/* Section 2 — Physical Condition Description */}
+            <div className="brutalist-card-flat p-4 bg-zinc-50 dark:bg-zinc-900/50 space-y-2">
+              <label className="block">
+                <span className="block text-xs font-black uppercase text-zinc-900 dark:text-zinc-100 tracking-wider">
+                  Property Condition <span className="text-red-500">*</span>
+                </span>
+              </label>
+              <textarea
+                value={formData.listingRequirements.physicalConditionDescription}
+                onChange={(e) => setFormData(prev => ({
+                  ...prev,
+                  listingRequirements: {
+                    ...prev.listingRequirements,
+                    physicalConditionDescription: e.target.value
+                  }
+                }))}
+                placeholder="Describe the current state of the property: structural condition, interior finish, exterior, access road, utilities, any known issues..."
+                className="w-full brutalist-input-large min-h-[120px] p-3 text-xs leading-relaxed"
+              />
+              <div className="flex justify-between items-center text-[10px] font-black uppercase">
+                <span className="text-zinc-400 italic">Written in first person</span>
+                <span className={cn(
+                  formData.listingRequirements.physicalConditionDescription.length >= 100 
+                    ? "text-brand-teal" 
+                    : "text-zinc-400"
+                )}>
+                  {formData.listingRequirements.physicalConditionDescription.length} / 100 minimum
+                </span>
+              </div>
+            </div>
+
+            {/* Section 3 — Property Photos */}
+            <div className="brutalist-card-flat p-4 bg-zinc-50 dark:bg-zinc-900/50 space-y-3">
+              <div className="flex justify-between items-baseline">
+                <label className="block">
+                  <span className="block text-xs font-black uppercase text-zinc-900 dark:text-zinc-100 tracking-wider">
+                    Property Photos <span className="text-red-500">*</span>
+                  </span>
+                </label>
+                <span className={cn(
+                  "text-[10px] font-black uppercase px-2 py-0.5",
+                  formData.listingRequirements.photos.length >= 3 
+                    ? "bg-brand-teal text-brand-black border-2 border-brand-black" 
+                    : "bg-red-50 text-red-500 border-2 border-red-500 animate-pulse"
+                )}>
+                  {formData.listingRequirements.photos.length} of 3 required
+                </span>
+              </div>
+              
+              <label className="flex h-14 border-2 border-dashed border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors items-center justify-center cursor-pointer select-none">
+                <input 
+                  type="file" 
+                  multiple 
+                  accept=".jpg,.jpeg,.png" 
+                  onChange={handlePhotosUpload} 
+                  className="hidden" 
+                />
+                <span className="text-xs font-black uppercase text-brand-teal">CHOOSE PHOTO FILES (JPG, PNG)</span>
+              </label>
+              
+              {formData.listingRequirements.photos.length > 0 && (
+                <div className="grid grid-cols-3 gap-2 mt-2">
+                  {formData.listingRequirements.photos.map((photo, index) => (
+                    <div key={index} className="relative aspect-square border-2 border-brand-black bg-zinc-200">
+                      <img 
+                        src={photo} 
+                        alt={`Preview ${index}`} 
+                        className="w-full h-full object-cover" 
+                        referrerPolicy="no-referrer"
                       />
-                      <div className="flex items-center gap-3">
-                        <FileText size={20} className={isSelected ? "text-brand-teal" : "text-zinc-300"} />
-                        <span className="font-display font-black uppercase text-xs flex-1 text-brand-black dark:text-white">{doc.name}</span>
-                        {isSelected && <CheckCircle2 size={18} className="text-brand-teal" />}
-                      </div>
-                      <p className="text-[9px] font-black uppercase text-zinc-400 tracking-widest pl-8 italic">
-                        {doc.desc}
-                      </p>
-                    </label>
-
-                    <AnimatePresence>
-                      {isSelected && (
-                        <motion.div 
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: 'auto', opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          className="overflow-hidden"
-                        >
-                          <div className="p-3 bg-white dark:bg-zinc-900 border-x-4 border-b-4 border-brand-teal flex items-center justify-between gap-4">
-                            <div className="flex-1">
-                              <p className="text-[9px] font-black uppercase text-brand-teal mb-1">
-                                {isUploaded ? `Uploaded: ${formData.documentFiles[doc.name].fileName}` : "Upload JPEG/PNG/PDF"}
-                              </p>
-                              {!isUploaded && <p className="text-[7px] text-zinc-400 uppercase font-black tracking-tighter">Required for verification speed</p>}
-                            </div>
-                            <label className="brutalist-button px-4 py-2 text-[9px] h-auto cursor-pointer">
-                              {isUploaded ? "Replace" : "Select File"}
-                              <input 
-                                type="file" 
-                                className="hidden" 
-                                accept=".jpg,.jpeg,.png,.pdf"
-                                onChange={(e) => handleFileUpload(doc.name, e)}
-                              />
-                            </label>
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                );
-              })}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormData(prev => ({
+                            ...prev,
+                            listingRequirements: {
+                              ...prev.listingRequirements,
+                              photos: prev.listingRequirements.photos.filter((_, idx) => idx !== index)
+                            }
+                          }));
+                        }}
+                        className="absolute top-1 right-1 bg-red-500 text-white border border-brand-black hover:bg-red-650 w-5 h-5 flex items-center justify-center text-[10px] font-bold shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
-            {/* Optional Legal Inputs */}
-            <div className="brutalist-card-flat p-4 space-y-4">
-              <h3 className="text-[10px] font-black uppercase tracking-widest text-zinc-500 italic border-b border-brand-black/10 pb-2 mb-2">Additional Legal Data</h3>
-              <div className="flex flex-col gap-1.5">
-                <label className="flex justify-between items-center text-[10px] font-black uppercase text-zinc-500 tracking-widest pl-1">
-                  <span>Title Company / Surveyor Name (Optional)</span>
-                  <span className="text-brand-teal">+200 pts</span>
-                </label>
-                <input 
-                  type="text" 
-                  className="brutalist-input-large"
-                  placeholder="e.g. Adetokunbo Surveyors Ltd"
-                  value={formData.titleCompany}
-                  onChange={e => setFormData({...formData, titleCompany: e.target.value})}
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <label className="flex justify-between items-center text-[10px] font-black uppercase text-zinc-500 tracking-widest pl-1">
-                  <span>Legal Encumbrances (Optional)</span>
-                  <span className="text-brand-teal">+200 pts</span>
-                </label>
-                <input 
-                  type="text" 
-                  className="brutalist-input-large"
-                  placeholder="e.g. Freehold, Pending Litigation, Covenanted"
-                  value={formData.legalEncumbrances}
-                  onChange={e => setFormData({...formData, legalEncumbrances: e.target.value})}
-                />
-              </div>
-            </div>
-
-            {formData.documents.length < 2 && step === 3 && (
-              <p className="text-[10px] font-black uppercase text-brand-red text-center mt-2 animate-bounce">
-                Please select at least 2 documents to continue
+            {/* Section 4 — Location Pin */}
+            <div className="brutalist-card-flat p-4 bg-zinc-50 dark:bg-zinc-900/50 space-y-2">
+              <label className="block">
+                <span className="block text-xs font-black uppercase text-zinc-900 dark:text-zinc-100 tracking-wider">
+                  Google Maps Location Pin <span className="text-red-500">*</span>
+                </span>
+              </label>
+              <input 
+                type="text" 
+                value={formData.listingRequirements.locationPin} 
+                onChange={(e) => setFormData(prev => ({
+                  ...prev,
+                  listingRequirements: {
+                    ...prev.listingRequirements,
+                    locationPin: e.target.value
+                  }
+                }))}
+                placeholder="https://maps.google.com/..."
+                className="w-full brutalist-input-large text-xs"
+              />
+              
+              <p className="text-[10px] font-black uppercase text-zinc-400 tracking-wider leading-normal">
+                Open Google Maps, find your property, tap Share → Copy Link, paste here
               </p>
-            )}
+              
+              {formData.listingRequirements.locationPin && 
+               !formData.listingRequirements.locationPin.startsWith('https://maps.google') && 
+               !formData.listingRequirements.locationPin.startsWith('https://goo.gl') && (
+                <p className="text-[10px] font-black uppercase text-red-500 bg-red-50 dark:bg-red-950/25 p-2 border-l-4 border-red-500">
+                  Inline error: Must start with https://maps.google or https://goo.gl
+                </p>
+              )}
+            </div>
 
+            {/* Step Navigation Controls - Gated Next Button */}
             <div className="flex gap-4 mt-8 pt-4 border-t-2 border-brand-black/5">
               <button onClick={handlePrev} className="brutalist-button-gray flex-1 group">
                 <ArrowLeft size={16} className="group-hover:-translate-x-1 transition-transform" />
                 Back
               </button>
-              <button 
-                onClick={handleNext} 
-                disabled={formData.documents.length < 2}
-                className="brutalist-button-black flex-[2] group disabled:opacity-50"
-              >
-                Identify Entity
-                <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
-              </button>
+              {requirementsMet && (
+                <button 
+                  onClick={handleNext} 
+                  className="brutalist-button-black flex-[2] group"
+                >
+                  Identify Entity
+                  <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
+                </button>
+              )}
             </div>
           </motion.div>
         )}
@@ -1191,35 +1378,28 @@ export default function ListingForm() {
                 </div>
               </div>
 
-              {/* Commission Selection */}
-              <div className="brutalist-card-flat p-4 bg-white dark:bg-zinc-900 space-y-4">
-                <div className="flex justify-between items-center border-b border-brand-black/10 pb-2">
-                   <h3 className="text-[10px] font-black uppercase tracking-widest text-zinc-500 italic">Agent Commission</h3>
-                   <span className="bg-brand-black text-brand-teal px-2 py-0.5 text-[10px] font-black">{formData.commission}%</span>
+              {/* Platform Commission Info Card */}
+              <div className="p-4 bg-brand-black text-white border-2 border-brand-teal shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
+                <div className="flex justify-between items-center border-b border-brand-teal/25 pb-2 mb-2">
+                  <h3 className="text-xs font-display font-black uppercase text-brand-teal tracking-widest leading-none">Platform Commission</h3>
+                  <span className="bg-brand-teal text-brand-black px-2 py-0.5 text-[9px] font-black uppercase tracking-wider">{PLATFORM_COMMISSION_RATE}% FIXED</span>
                 </div>
-                
-                <div className="px-2 pt-4">
-                  <input 
-                    type="range" 
-                    min={formData.listingPurpose === 'Sale' ? 0.5 : 10}
-                    max={formData.listingPurpose === 'Sale' ? 5 : 20}
-                    step={0.5}
-                    value={formData.commission}
-                    onChange={(e) => setFormData({...formData, commission: parseFloat(e.target.value)})}
-                    className="w-full h-3 bg-zinc-200 dark:bg-zinc-800 appearance-none border-2 border-brand-black cursor-pointer accent-brand-teal"
-                  />
-                  <div className="flex justify-between mt-2">
-                    <span className="text-[9px] font-black text-zinc-400 uppercase italic">
-                      {formData.listingPurpose === 'Sale' ? '0.5%' : '10%'} (Min)
-                    </span>
-                    <span className="text-[9px] font-black text-zinc-400 uppercase italic">
-                      {formData.listingPurpose === 'Sale' ? '5%' : '20%'} (Max)
+                <p className="text-[11px] text-zinc-300 font-medium leading-relaxed mb-3">
+                  RealAgents charges a fixed 5% facilitation fee on all completed transactions.
+                  This is non-negotiable and is the same for all agents, regardless of tier.
+                </p>
+                {formData.price ? (
+                  <div className="flex justify-between items-center bg-zinc-900 border border-brand-teal/20 p-2.5 font-mono text-xs">
+                    <span className="text-zinc-400 font-semibold uppercase text-[10px]">FACILITATION FEE</span>
+                    <span className="text-brand-teal font-bold select-all">
+                      On ₦{formData.price}, this equals ₦{formatNumber(Math.round(Number(parseFormattedNumber(formData.price)) * (PLATFORM_COMMISSION_RATE / 100)))}
                     </span>
                   </div>
-                </div>
-                <p className="text-[8px] font-black uppercase text-zinc-400 tracking-wider leading-tight">
-                  This commission will be reflected on your property listing for transparency.
-                </p>
+                ) : (
+                  <div className="bg-zinc-900 border border-brand-teal/20 p-2.5 font-mono text-[10px] text-zinc-500 uppercase tracking-wider text-center">
+                    Enter target price to calculate facilitation fee
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1356,22 +1536,24 @@ export default function ListingForm() {
                  <ArrowLeft size={16} className="group-hover:-translate-x-1 transition-transform" />
                  Back
               </button>
-              <button 
-                onClick={handleSubmit} 
-                className="brutalist-button-teal flex-[2] group"
-                disabled={isSubmitting || !formData.contactName || !formData.contactPhone}
-              >
-                {isSubmitting ? (
-                  <span className="flex items-center gap-2 animate-pulse">
-                    Logging Request...
-                  </span>
-                ) : (
-                  <>
-                    Confirm Submission
-                    <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
-                  </>
-                )}
-              </button>
+              {requirementsMet && (
+                <button 
+                  onClick={handleSubmit} 
+                  className="brutalist-button-teal flex-[2] group"
+                  disabled={isSubmitting || !formData.contactName || !formData.contactPhone}
+                >
+                  {isSubmitting ? (
+                    <span className="flex items-center gap-2 animate-pulse">
+                      Logging Request...
+                    </span>
+                  ) : (
+                    <>
+                      Confirm Submission
+                      <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
+                    </>
+                  )}
+                </button>
+              )}
             </div>
             <p className="text-[8px] text-center font-black uppercase tracking-widest text-zinc-400 mt-2">
               By submitting, you authorize RealAgent to begin verification. 

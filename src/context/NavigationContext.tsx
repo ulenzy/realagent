@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
-type ActiveTab = 'home' | 'ai' | 'profile' | 'my_listings';
+type ActiveTab = 'marketplace' | 'ai' | 'myspace' | 'profile';
 
 interface NavigationContextType {
   activeTab: ActiveTab;
@@ -19,7 +19,7 @@ interface NavigationContextType {
 const NavigationContext = createContext<NavigationContextType | undefined>(undefined);
 
 export const NavigationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [activeTab, setActiveTabState] = useState<ActiveTab>('home');
+  const [activeTab, setActiveTabState] = useState<ActiveTab>('marketplace');
   const [selectedPropertyId, setSelectedPropertyIdState] = useState<string | null>(null);
   const [selectedAgentId, setSelectedAgentIdState] = useState<string | null>(null);
   const [isListingFlow, setIsListingFlowState] = useState(false);

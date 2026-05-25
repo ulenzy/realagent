@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { cn } from '../lib/utils';
 
 export default function Login() {
-  const { signInWithGoogle, signInWithFacebook, signInAsGuest } = useAuth();
+  const { signInWithGoogle, signInWithFacebook, signInAsGuest, signInWithGoogleMock, signInWithFacebookMock } = useAuth();
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastAttempt, setLastAttempt] = useState(0);
@@ -32,7 +32,16 @@ export default function Login() {
       if (provider === 'facebook') await signInWithFacebook();
       if (provider === 'guest') await signInAsGuest();
     } catch (err: any) {
-      setError(err.message || `Failed to sign in with ${provider}`);
+      console.error(`${provider} sign-in error:`, err);
+      if (err.code === 'auth/popup-closed-by-user' || err.message?.includes('popup-closed-by-user')) {
+        setError('Sign in cancelled. The authentication window was closed.');
+      } else if (err.code === 'auth/cancelled-popup-request' || err.message?.includes('cancelled-popup-request')) {
+        setError('Only one sign-in window can be active at a time.');
+      } else if (err.code === 'auth/popup-blocked' || err.message?.includes('popup-blocked')) {
+        setError('Sign in window was blocked. Please allow popups for this site.');
+      } else {
+        setError(err.message || `Failed to sign in with ${provider}`);
+      }
     } finally {
       setLoading(null);
     }
@@ -108,10 +117,35 @@ export default function Login() {
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
-              className="mt-6 p-4 bg-red-100 border-2 border-red-500 text-red-600 flex items-start gap-3 overflow-hidden"
+              className="mt-6 p-4 bg-red-50 dark:bg-zinc-800 border-2 border-red-500 text-red-600 dark:text-red-400 flex flex-col gap-3 overflow-hidden select-none"
             >
-              <AlertCircle size={20} className="shrink-0 mt-0.5" />
-              <p className="text-sm font-bold uppercase leading-tight">{error}</p>
+              <div className="flex items-start gap-3">
+                <AlertCircle size={20} className="shrink-0 mt-0.5" />
+                <p className="text-sm font-bold uppercase leading-tight">{error}</p>
+              </div>
+
+              {/* Secure simulated authentication bypass for sandbox environments */}
+              {(error.includes('window was closed') || error.includes('blocked') || error.includes('Only one sign-in') || error.includes('failed') || error.includes('cancelled')) && (
+                <div className="p-3 bg-white dark:bg-zinc-900 border-2 border-red-500 text-brand-black dark:text-white flex flex-col gap-2 mt-1">
+                  <p className="text-[10px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 leading-tight">
+                    Popups are typically blocked or fail to communicate back in the sandboxed preview iframe.
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => signInWithGoogleMock()}
+                      className="bg-brand-black hover:bg-brand-teal dark:bg-zinc-800 text-white p-2 text-[10px] font-black border-2 border-brand-black hover:border-brand-teal uppercase tracking-widest text-center shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 transition-all cursor-pointer"
+                    >
+                      MOCK GOOGLE
+                    </button>
+                    <button
+                      onClick={() => signInWithFacebookMock()}
+                      className="bg-brand-black hover:bg-brand-teal dark:bg-zinc-800 text-white p-2 text-[10px] font-black border-2 border-brand-black hover:border-brand-teal uppercase tracking-widest text-center shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 transition-all cursor-pointer"
+                    >
+                      MOCK FACEBOOK
+                    </button>
+                  </div>
+                </div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>

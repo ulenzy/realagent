@@ -27,8 +27,8 @@ export default function ListingModal({ isOpen, onClose, onAgree }: ListingModalP
     },
     {
       icon: <Percent className="text-brand-teal" size={20} />,
-      title: "Flexible Commission",
-      desc: "You have full control over your commission structure. Set your rate within the allowed brackets (0.5%-5% for sales, 10%-20% for rentals). This exact rate will be publicly displayed on your listing."
+      title: "Fixed Platform Commission",
+      desc: "The platform enforces a non-negotiable 5% platform commission on all completed transactions. This flat rate applies equally to all partners for total market transparency."
     },
     {
       icon: <Clock className="text-brand-teal" size={20} />,

@@ -10,7 +10,7 @@
 
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Home, Search, FileText, Zap, MessageCircle, Moon, Sun } from 'lucide-react';
+import { Home, Search, FileText, Zap, MessageCircle, Moon, Sun, Gavel, Heart, Store, Sparkles, LayoutDashboard, Plus } from 'lucide-react';
 import { cn } from './lib/utils';
 import { mockProperties } from './data/mockListings';
 import { ListingRequest } from './types';
@@ -28,6 +28,8 @@ import { useAuth } from './context/AuthContext';
 import { useNavigation } from './context/NavigationContext';
 import { useUI } from './context/UIContext';
 import { getUserAvatarUrl } from './lib/avatar';
+import AgentBidding from './components/AgentBidding';
+import MySpace from './components/MySpace';
 
 export default function App() {
   const { user, firebaseUser, loading, error, listingRequests, savedProperties, toggleSavedProperty, addListingRequest, updateListingRequest, updateUser, addTransaction, logout } = useAuth();
@@ -80,8 +82,10 @@ export default function App() {
       addTransaction(newTransaction as any);
     }
 
+    const PLATFORM_COMMISSION_RATE = 5;
     const newRequest: ListingRequest = {
       ...request,
+      commission: PLATFORM_COMMISSION_RATE,
       id: `req-${Date.now()}`,
       status: 'Pending',
       submittedAt: new Date().toISOString(),
@@ -129,7 +133,7 @@ export default function App() {
     <div className="flex flex-col min-h-screen bg-brand-gray dark:bg-[#1c1c21] selection:bg-brand-teal selection:text-brand-black font-sans transition-colors duration-300">
       {/* Header - Global */}
       <header className="aggressive-header">
-        <div className="flex items-center gap-3 cursor-pointer" onClick={() => { setActiveTab('home'); handleBackToMarketplace(); }}>
+        <div className="flex items-center gap-3 cursor-pointer" onClick={() => { setActiveTab('marketplace'); handleBackToMarketplace(); }}>
           <img src={logoImage} alt="RealAgents Logo" className="w-[115px] h-[26px] drop-shadow-[2px_2px_0_rgba(0,24,41,1)] object-contain rounded-md" />
         </div>
         <div className="flex gap-4">
@@ -148,16 +152,18 @@ export default function App() {
             <MessageCircle className="w-5 h-5 text-brand-black dark:text-white" />
             <span className="absolute -top-1 -right-1 w-4 h-4 bg-brand-red text-white text-[8px] font-black flex items-center justify-center rounded-full border border-brand-black">2</span>
           </button>
-          {activeTab !== 'profile' && (
-            <button 
-              onClick={() => { setActiveTab('profile'); handleBackToMarketplace(); }}
-              className="hover:text-brand-teal transition-colors p-1 border-2 border-transparent hover:border-brand-black hover:bg-white dark:hover:bg-zinc-900 dark:hover:border-zinc-700 shadow-none hover:shadow-brutal-sm dark:hover:shadow-[2px_2px_0px_0px_#52525b] rounded-full"
-            >
-              <div className="w-8 h-8 rounded-full border-2 border-brand-black overflow-hidden bg-brand-teal shadow-brutal-sm">
-                <img src={getUserAvatarUrl(user)} alt="User" />
-              </div>
-            </button>
-          )}
+          <button 
+            onClick={() => { setActiveTab('profile'); handleBackToMarketplace(); }}
+            className={cn(
+              "hover:text-brand-teal transition-colors p-1 border-2 border-transparent hover:border-brand-black hover:bg-white dark:hover:bg-zinc-900 dark:hover:border-zinc-700 shadow-none hover:shadow-brutal-sm dark:hover:shadow-[2px_2px_0px_0px_#52525b] rounded-full",
+              activeTab === 'profile' && "border-brand-black bg-white dark:bg-zinc-900 shadow-brutal-sm dark:border-zinc-700 dark:shadow-[2px_2px_0px_0px_#52525b]"
+            )}
+            aria-label="My Profile"
+          >
+            <div className="w-8 h-8 rounded-full border-2 border-brand-black overflow-hidden bg-brand-teal shadow-brutal-sm">
+              <img src={getUserAvatarUrl(user)} alt="User" />
+            </div>
+          </button>
         </div>
       </header>
 
@@ -206,15 +212,38 @@ export default function App() {
               transition={{ type: "spring", stiffness: 450, damping: 35 }}
               className="w-full max-w-5xl mx-auto"
             >
-              {activeTab === 'home' && <Marketplace />}
+              {activeTab === 'marketplace' && <Marketplace />}
               {activeTab === 'ai' && <AISearch />}
-              {(activeTab === 'profile' || activeTab === 'my_listings') && (
-                <Profile initialView={activeTab === 'my_listings' ? 'My Listings' : 'main'} />
+              {activeTab === 'myspace' && (
+                <MySpace 
+                  defaultActiveSubTab={
+                    user?.role === 'Seller' 
+                      ? 'My Listings' 
+                      : user?.role === 'Agent' 
+                        ? 'Bids' 
+                        : 'Wishlist'
+                  } 
+                />
               )}
+              {activeTab === 'profile' && <Profile initialView="main" />}
             </motion.div>
           )}
         </AnimatePresence>
       </main>
+
+      {/* Floating Action Button (FAB) on the Marketplace Screen */}
+      {activeTab === 'marketplace' && !selectedPropertyId && !isListingFlow && !selectedAgentId && (
+        <button
+          id="marketplace-fab-list-property"
+          onClick={() => {
+            setIsListingFlow(true);
+          }}
+          className="fixed bottom-24 right-6 sm:bottom-28 sm:right-10 z-[100] bg-brand-teal text-brand-black p-4 border-4 border-brand-black hover:bg-teal-400 active:translate-y-0.5 shadow-brutal-xs hover:shadow-none transition-all flex flex-col items-center justify-center rounded-none select-none max-w-[125px] hover:translate-x-0.5"
+        >
+          <Plus className="w-8 h-8 font-black mb-1" />
+          <span className="text-[9px] font-display font-black tracking-wider uppercase text-center leading-none">LIST PROPERTY</span>
+        </button>
+      )}
 
       <Messaging 
         isOpen={isMessagingOpen} 
@@ -226,24 +255,24 @@ export default function App() {
       {!selectedPropertyId && !isListingFlow && (
         <nav className="fixed bottom-0 left-0 right-0 bg-white dark:bg-[#1c1c21] border-t-4 border-black dark:border-zinc-700 p-2 z-50 transition-colors duration-300">
           <div className="max-w-md mx-auto flex justify-between items-center px-4">
-            <TabButton 
-              active={activeTab === 'home'} 
-              onClick={() => { setActiveTab('home'); handleBackToMarketplace(); }}
-              icon={<Home />}
+             <TabButton 
+              active={activeTab === 'marketplace'} 
+              onClick={() => { setActiveTab('marketplace'); handleBackToMarketplace(); }}
+              icon={<Store />}
               label="Marketplace"
             />
             <TabButton 
               active={activeTab === 'ai'} 
               onClick={() => { setActiveTab('ai'); handleBackToMarketplace(); }}
-              icon={<Search />}
+              icon={<Sparkles />}
               label="AI Intelligence"
               special
             />
             <TabButton 
-              active={activeTab === 'my_listings'} 
-              onClick={() => { setActiveTab('my_listings'); handleBackToMarketplace(); }}
-              icon={<FileText />}
-              label="My Listings"
+              active={activeTab === 'myspace'} 
+              onClick={() => { setActiveTab('myspace'); handleBackToMarketplace(); }}
+              icon={<LayoutDashboard />}
+              label="My Space"
             />
           </div>
         </nav>
@@ -257,13 +286,15 @@ function TabButton({
   onClick, 
   icon, 
   label,
-  special
+  special,
+  badge
 }: { 
   active: boolean; 
   onClick: () => void; 
   icon: React.ReactNode; 
   label: string;
   special?: boolean;
+  badge?: boolean;
 }) {
   return (
     <button
@@ -274,11 +305,14 @@ function TabButton({
       )}
     >
       <div className={cn(
-        "mb-1 transition-transform group-active:scale-90",
+        "mb-1 transition-transform group-active:scale-90 relative",
         special && "p-2 bg-brand-black text-brand-teal rounded-full -mt-6 border-2 border-brand-teal shadow-aggressive",
         active && !special && "scale-110"
       )}>
         {React.cloneElement(icon as React.ReactElement, { size: special ? 24 : 22 })}
+        {badge && (
+          <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-amber-500 border border-black rounded-full animate-pulse" />
+        )}
       </div>
       <span className={cn(
         "text-[10px] font-display font-black uppercase tracking-widest",

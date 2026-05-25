@@ -226,11 +226,9 @@ export default function PropertyDetail({
                   </div>
                   <div className="flex items-baseline gap-3 flex-wrap">
                     <p className="text-4xl lg:text-5xl font-display font-black text-brand-teal">{formatCurrency(property.price)}</p>
-                    {property.commission !== undefined && (
-                      <div className="bg-brand-red text-white px-2 py-1 font-display font-black text-sm uppercase tracking-tight border-2 border-white/20 shadow-brutal-xs">
-                        {property.commission}% COMM
-                      </div>
-                    )}
+                    <div className="bg-brand-red text-white px-2 py-1 font-display font-black text-sm uppercase tracking-tight border-2 border-white/20 shadow-brutal-xs">
+                      5% COMM
+                    </div>
                   </div>
                 </div>
                 <div className="bg-brand-teal text-brand-black px-4 py-1 font-display font-black text-sm uppercase">

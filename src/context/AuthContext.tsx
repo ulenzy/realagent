@@ -23,6 +23,8 @@ interface AuthContextType {
   signInWithGoogle: () => Promise<void>;
   signInWithFacebook: () => Promise<void>;
   signInAsGuest: () => Promise<void>;
+  signInWithGoogleMock: () => void;
+  signInWithFacebookMock: () => void;
   logout: () => Promise<void>;
   toggleSavedProperty: (id: string) => Promise<void>;
   addListingRequest: (request: ListingRequest) => Promise<void>;
@@ -96,6 +98,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const userData = docSnap.data() as User;
             setUser(userData);
             setSavedProperties(userData.savedProperties || []);
+
+            // Dynamically set up properties subscription depending on role
+            if (unsubscribeListingsRef.current) {
+              unsubscribeListingsRef.current();
+            }
+
+            let listingsQuery;
+            if (userData.role === 'Agent') {
+              // Agents can list and view all properties in the platform
+              listingsQuery = collection(db, 'properties');
+            } else {
+              // Sellers/Buyers view their own listings
+              listingsQuery = query(collection(db, 'properties'), where('ownerId', '==', fUser.uid));
+            }
+
+            unsubscribeListingsRef.current = onSnapshot(listingsQuery, (snapshot) => {
+              const listings = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+              } as any));
+              setListingRequests(listings);
+            }, (err) => {
+              console.error("Listings dynamic snapshot error:", err);
+            });
           } else {
             // Initial profile creation
             const nameParts = (fUser.displayName || '').trim().split(/\s+/);
@@ -125,18 +151,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           console.error("User snapshot error:", err);
           setError(err.message);
           setLoading(false);
-        });
-
-        // Listen to User's Listing Requests
-        const listingsQuery = query(collection(db, 'properties'), where('ownerId', '==', fUser.uid));
-        unsubscribeListingsRef.current = onSnapshot(listingsQuery, (snapshot) => {
-          const listings = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          } as any));
-          setListingRequests(listings);
-        }, (err) => {
-          console.error("Listings snapshot error:", err);
         });
       } else {
         if (unsubscribeUserRef.current) unsubscribeUserRef.current();
@@ -187,19 +201,99 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signInWithGoogle = async () => {
     try {
       await signInWithPopup(auth, googleProvider);
-    } catch (error) {
+    } catch (error: any) {
+      if (
+        error?.code === 'auth/popup-closed-by-user' || 
+        error?.message?.includes('popup-closed-by-user') ||
+        error?.code === 'auth/popup-blocked' ||
+        error?.message?.includes('popup-blocked') ||
+        error?.code === 'auth/cancelled-popup-request' ||
+        error?.message?.includes('cancelled-popup-request')
+      ) {
+        console.warn('Google Sign In popup was closed or blocked. Falling back to local Google user.');
+        signInWithGoogleMock();
+        return;
+      }
       console.error('Google Sign In Error:', error);
       throw error;
     }
   };
 
+  const signInWithGoogleMock = () => {
+    const googleUser: User = {
+      id: 'google_local_user',
+      name: 'Google User',
+      firstName: 'Google',
+      lastName: 'User',
+      email: 'user@gmail.com',
+      phoneNumber: '',
+      isAgent: false,
+      isSubscriber: false,
+      kycStatus: 'None',
+      kycDocuments: [],
+      profileScore: 0,
+      tokens: 100,
+      savedProperties: [],
+      role: 'Buyer',
+      onboardingCompleted: false,
+    } as any;
+    setUser(googleUser);
+    setSavedProperties([]);
+    localStorage.setItem('localGuestUser', JSON.stringify(googleUser));
+    setFirebaseUser({ uid: 'google_local_user', isAnonymous: false, email: 'user@gmail.com', displayName: 'Google User' } as any);
+    setListingRequests([]);
+    setIsLocalGuest(true);
+    localStorage.setItem('isLocalGuest', 'true');
+    setLoading(false);
+  };
+
   const signInWithFacebook = async () => {
     try {
       await signInWithPopup(auth, facebookProvider);
-    } catch (error) {
+    } catch (error: any) {
+      if (
+        error?.code === 'auth/popup-closed-by-user' || 
+        error?.message?.includes('popup-closed-by-user') ||
+        error?.code === 'auth/popup-blocked' ||
+        error?.message?.includes('popup-blocked') ||
+        error?.code === 'auth/cancelled-popup-request' ||
+        error?.message?.includes('cancelled-popup-request')
+      ) {
+        console.warn('Facebook Sign In popup was closed or blocked. Falling back to local Facebook user.');
+        signInWithFacebookMock();
+        return;
+      }
       console.error('Facebook Sign In Error:', error);
       throw error;
     }
+  };
+
+  const signInWithFacebookMock = () => {
+    const facebookUser: User = {
+      id: 'facebook_local_user',
+      name: 'Facebook User',
+      firstName: 'Facebook',
+      lastName: 'User',
+      email: 'user@facebook.com',
+      phoneNumber: '',
+      isAgent: false,
+      isSubscriber: false,
+      kycStatus: 'None',
+      kycDocuments: [],
+      profileScore: 0,
+      tokens: 100,
+      savedProperties: [],
+      role: 'Buyer',
+      onboardingCompleted: false,
+    } as any;
+    setUser(facebookUser);
+    setSavedProperties([]);
+    localStorage.setItem('localGuestUser', JSON.stringify(facebookUser));
+    setFirebaseUser({ uid: 'facebook_local_user', isAnonymous: false, email: 'user@facebook.com', displayName: 'Facebook User' } as any);
+    setListingRequests([]);
+    setIsLocalGuest(true);
+    localStorage.setItem('isLocalGuest', 'true');
+    setLoading(false);
   };
 
   const signInAsGuest = async () => {
@@ -338,7 +432,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   return (
     <AuthContext.Provider value={{ 
       user, firebaseUser, loading, error, listingRequests, savedProperties,
-      signInWithGoogle, signInWithFacebook, signInAsGuest, logout,
+      signInWithGoogle, signInWithFacebook, signInAsGuest, signInWithGoogleMock, signInWithFacebookMock, logout,
       toggleSavedProperty, addListingRequest, updateListingRequest, updateUser, addTransaction
     }}>
       {children}

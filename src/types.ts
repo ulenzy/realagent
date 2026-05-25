@@ -4,6 +4,8 @@ export type PropertyType = 'Land' | 'House';
 
 export type ListingType = 'Sale' | 'Rent';
 
+export type AgentTier = 'Verified Professional' | 'Platform Agent';
+
 export interface Agent {
   id: string;
   name: string;
@@ -94,7 +96,32 @@ export interface Property {
   acceptsDownPayment?: boolean;
 }
 
-export type ListingStatus = 'Pending' | 'Inspection Scheduled' | 'Under Review' | 'Approved' | 'Rejected' | 'Archived';
+export type ListingStatus = 'Pending' | 'Agent Bidding' | 'Inspection Scheduled' | 'Under Review' | 'Approved' | 'Rejected' | 'Archived';
+
+export interface ListingRequirements {
+  titleDocumentFileName: string;       // filename of uploaded title document
+  titleDocumentFileType: string;       // mime type of uploaded file
+  physicalConditionDescription: string; // min 100 chars — seller's own description
+  photos: string[];                    // min 3 photo filenames/URLs
+  locationPin: string;                 // Google Maps pin link — required
+  inspectionNotes?: string;            // filled by agent post-inspection, not seller
+  inspectionCompletedAt?: string;      // ISO timestamp — filled by agent
+  inspectionCompletedBy?: string;      // agentId — filled by agent
+}
+
+export interface AgentBid {
+  id: string;
+  agentId: string;
+  agentName: string;
+  agentTier: AgentTier;                    // 'Verified Professional' or 'Platform Agent'
+  agentTrustScore: number;
+  agentVerified: boolean;                  // true only if Tier 1 and reg number confirmed
+  agentRegNumber?: string;                 // present only for Tier 1 agents
+  coverageNote: string;
+  distanceKm?: number;
+  submittedAt: string;
+  status: 'Pending' | 'Accepted' | 'Rejected';
+}
 
 export interface ListingRequest {
   id: string;
@@ -108,7 +135,7 @@ export interface ListingRequest {
   expiresAt: string;
   isBoosted?: boolean;
   isSubscriber?: boolean;
-  commission?: number;
+  commission: number;
   acceptsDownPayment?: boolean;
   documents?: { name: string; fileType: string; fileName: string }[];
   googlePinLink?: string;
@@ -118,6 +145,10 @@ export interface ListingRequest {
     inquiries: number;
   };
   trustScore?: number;
+  assignedAgentId?: string;
+  assignedAgentTier?: AgentTier;
+  listingRequirements: ListingRequirements;
+  agentBids?: AgentBid[];
 }
 
 export interface Message {
@@ -177,7 +208,10 @@ export interface User {
   totalReviews?: number;
   tokens: number;
   transactions?: Transaction[];
-  role?: 'Buyer' | 'Agent' | 'Developer';
+  role: 'Buyer' | 'Seller' | 'Agent';
+  agentTier?: AgentTier;
+  agentRegNumber?: string;
+  agentVerificationStatus?: 'Unverified' | 'Pending' | 'Verified' | 'Rejected';
   preferredLocations?: string[];
   gender?: 'Male' | 'Female' | 'Other' | 'Prefer not to say';
   linkedin?: string;

@@ -46,20 +46,33 @@ service cloud.firestore {
 
     // --- Property Listings ---
     match /properties/{propertyId} {
-      function isValidProperty(data) {
+      function getUserData() {
+        return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      }
+
+      function isValidProperty(data, originalOwnerId) {
         return data.keys().hasAll(['id', 'ownerId', 'title', 'price'])
-               && data.ownerId == request.auth.uid
+               && data.ownerId == originalOwnerId
                && data.title is string && data.title.size() <= 200
                && data.price is number && data.price >= 0;
       }
 
-      // Enforce: Users can only read, update, or delete records they created
-      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
-      allow get: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      // Enforce: Users can read, update, or delete records depending on their role
+      allow list, get: if isSignedIn() && (
+        resource.data.ownerId == request.auth.uid || 
+        getUserData().role == 'Agent'
+      );
       
-      allow create: if isSignedIn() && isValidId(propertyId) && isValidProperty(incoming());
-      allow update: if isSignedIn() && isOwner(existing().ownerId) && isValidProperty(incoming())
-                      && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'price', 'type', 'estateName', 'location', 'image', 'status', 'description']);
+      allow create: if isSignedIn() && isValidId(propertyId) && isValidProperty(incoming(), request.auth.uid);
+      allow update: if isSignedIn() && (
+        // Case 1: Owner total update
+        (isOwner(existing().ownerId) && isValidProperty(incoming(), request.auth.uid) 
+         && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'price', 'type', 'estateName', 'location', 'image', 'status', 'description', 'commission', 'acceptsDownPayment', 'documents', 'googlePinLink', 'metrics', 'trustScore', 'assignedAgentId', 'assignedAgentTier', 'listingRequirements', 'agentBids', 'lastUpdated'])) ||
+        // Case 2: Agent place bid
+        (getUserData().role == 'Agent' && existing().status == 'Agent Bidding' 
+         && incoming().diff(existing()).affectedKeys().hasOnly(['agentBids', 'lastUpdated']) 
+         && isValidProperty(incoming(), existing().ownerId))
+      );
       allow delete: if isSignedIn() && isOwner(existing().ownerId);
     }
   }

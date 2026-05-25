@@ -763,11 +763,9 @@ export const PropertyCard: React.FC<{
         
         {/* Price Tag Overlay - Luxury Fintech Pulse */}
         <div className="absolute bottom-4 right-0 flex flex-col items-end">
-          {property.commission !== undefined && (
-            <div className="bg-brand-red text-white px-2 py-0.5 border-l-4 border-white font-display font-black text-[9px] uppercase mb-1 shadow-brutal-sm">
-              {property.commission}% COMM
-            </div>
-          )}
+          <div className="bg-brand-red text-white px-2 py-0.5 border-l-4 border-white font-display font-black text-[9px] uppercase mb-1 shadow-brutal-sm">
+            5% COMM
+          </div>
           <div className="bg-brand-black text-brand-teal px-4 py-2 border-l-4 border-brand-teal font-display font-black text-lg shadow-aggressive">
             {formatCurrency(property.price)}
           </div>

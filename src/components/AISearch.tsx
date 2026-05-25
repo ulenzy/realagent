@@ -228,11 +228,9 @@ const RecommendationCard: React.FC<{ property: Property; onClick: () => void }> 
         <div className="flex items-center justify-between">
           <div className="flex flex-col">
             <span className="text-xs font-black text-brand-red font-display tracking-tight">₦{(property.price / 1000000).toFixed(1)}M</span>
-            {property.commission !== undefined && (
-              <span className="text-[7px] font-black uppercase text-brand-red opacity-80 leading-none">
-                {property.commission}% Comm
-              </span>
-            )}
+            <span className="text-[7px] font-black uppercase text-brand-red opacity-80 leading-none">
+              5% Comm
+            </span>
           </div>
           <div className="flex items-center gap-1 bg-brand-teal px-1 text-[9px] font-black text-brand-black uppercase border border-brand-black">
             <TrendingUp size={10} /> {property.roiPotential} ROI

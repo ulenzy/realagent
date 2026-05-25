@@ -3,7 +3,7 @@ import {
   User, Settings, Heart, History, HelpCircle, 
   ChevronRight, ShieldCheck, LogOut, PlusCircle,
   Briefcase, Bell, Zap, X, MapPin, ArrowLeft,
-  Eye, BarChart3, Edit3, Power, MessageSquare, Save, Star, Dices, Lock
+  Eye, BarChart3, Edit3, Power, MessageSquare, Save, Star, Dices, Lock, Sparkles
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
@@ -80,8 +80,62 @@ export default function Profile({ initialView = 'main' }: { initialView?: 'main'
     });
   };
   const [editingListing, setEditingListing] = useState<string | null>(null);
+  const [reviewingId, setReviewingId] = useState<string | null>(null);
   const [editFormData, setEditFormData] = useState<{title: string, price: string}>({title: '', price: ''});
   const [viewingMetrics, setViewingMetrics] = useState<string | null>(null);
+
+  const getRelativeTime = (dateStr?: string) => {
+    if (!dateStr) return 'just now';
+    const num = Date.now() - new Date(dateStr).getTime();
+    const mins = Math.floor(num / (1000 * 60));
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
+  };
+
+  const handleAcceptBid = async (listingId: string, bidId: string) => {
+    const listing = listingRequests.find(r => r.id === listingId);
+    if (!listing || !listing.agentBids) return;
+
+    const acceptedBid = listing.agentBids.find(b => b.id === bidId);
+    if (!acceptedBid) return;
+
+    const updatedBids = listing.agentBids.map(b => {
+      if (b.id === bidId) {
+        return { ...b, status: 'Accepted' as const };
+      } else {
+        return { ...b, status: 'Rejected' as const };
+      }
+    });
+
+    await updateListingRequest(listingId, {
+      assignedAgentId: acceptedBid.agentId,
+      assignedAgentTier: acceptedBid.agentTier,
+      status: 'Inspection Scheduled',
+      agentBids: updatedBids,
+      lastUpdated: new Date().toISOString()
+    });
+  };
+
+  const handleDeclineBid = async (listingId: string, bidId: string) => {
+    const listing = listingRequests.find(r => r.id === listingId);
+    if (!listing || !listing.agentBids) return;
+
+    const updatedBids = listing.agentBids.map(b => {
+      if (b.id === bidId) {
+        return { ...b, status: 'Rejected' as const };
+      }
+      return b;
+    });
+
+    await updateListingRequest(listingId, {
+      agentBids: updatedBids,
+      lastUpdated: new Date().toISOString()
+    });
+  };
 
   // Profile Edit State
   const [profileEditData, setProfileEditData] = useState({
@@ -245,6 +299,46 @@ export default function Profile({ initialView = 'main' }: { initialView?: 'main'
     );
   };
 
+  const renderRoleTierBadges = (u: any) => {
+    return (
+      <div className="flex flex-wrap gap-2 items-center my-2">
+        {u.role === 'Buyer' && (
+          <span className="px-2.5 py-1 bg-zinc-200 text-zinc-950 font-black text-[9px] uppercase tracking-wider border-2 border-brand-black shadow-brutal-xs">
+            Buyer
+          </span>
+        )}
+        {u.role === 'Seller' && (
+          <span className="px-2.5 py-1 bg-blue-500 text-white font-black text-[9px] uppercase tracking-wider border-2 border-brand-black shadow-brutal-xs">
+            Property Owner
+          </span>
+        )}
+        {u.role === 'Agent' && (
+          <>
+            {u.agentTier === 'Verified Professional' ? (
+              <>
+                <span className="px-2.5 py-1 bg-brand-teal text-brand-black font-black text-[9px] uppercase tracking-wider border-2 border-brand-black flex items-center gap-1 shadow-brutal-xs">
+                  Verified Professional
+                  {u.agentVerificationStatus === 'Verified' && (
+                    <ShieldCheck size={12} className="text-brand-black" />
+                  )}
+                </span>
+                {u.agentVerificationStatus === 'Pending' && (
+                  <span className="px-2.5 py-1 bg-amber-400 text-brand-black font-black text-[9px] uppercase tracking-wider border-2 border-brand-black shadow-brutal-xs">
+                    Verification Pending
+                  </span>
+                )}
+              </>
+            ) : (
+              <span className="px-2.5 py-1 bg-zinc-400 text-brand-black font-black text-[9px] uppercase tracking-wider border-2 border-brand-black shadow-brutal-xs">
+                Platform Agent
+              </span>
+            )}
+          </>
+        )}
+      </div>
+    );
+  };
+
   if (isPreviewing) {
     return (
       <div className="relative">
@@ -279,7 +373,7 @@ export default function Profile({ initialView = 'main' }: { initialView?: 'main'
                      <h2 className="text-3xl font-display font-black uppercase italic tracking-tighter">{user.name}</h2>
                      {user.kycStatus === 'Verified' && <ShieldCheck className="text-brand-teal" size={20} />}
                    </div>
-                   <p className="text-sm font-bold text-zinc-500 uppercase tracking-widest mb-3">{user.role || 'Property Enthusiast'}</p>
+                   {renderRoleTierBadges(user)}
                    <div className="mb-4">
                      {renderStars(user.rating || 4.5)}
                    </div>
@@ -392,6 +486,38 @@ export default function Profile({ initialView = 'main' }: { initialView?: 'main'
 
           {activeView === 'My Listings' && (
             <>
+              {/* Header with List New Property shortcut - ALWAYS shown at top */}
+              <div className="flex flex-col gap-4 mb-4 mt-2">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-2xl font-display font-black uppercase italic">My Listings</h3>
+                  <button
+                    onClick={() => handleAction('Request Listing')}
+                    className="bg-brand-black text-white px-4 py-2 border-2 border-brand-black hover:bg-brand-teal hover:text-brand-black transition-all shadow-brutal-sm hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none flex items-center gap-2 text-xs font-black uppercase tracking-wide animate-pulse"
+                  >
+                    <PlusCircle size={14} /> List New Property
+                  </button>
+                </div>
+
+                {/* Pipeline Status Summary counts */}
+                <div className="grid grid-cols-5 gap-2 select-none bg-brand-black text-white p-3 border-4 border-brand-black shadow-brutal-xs">
+                  {[
+                    { label: 'Pending', count: (listingRequests || []).filter(r => r.status === 'Pending').length, color: 'bg-zinc-500' },
+                    { label: 'Bidding', count: (listingRequests || []).filter(r => r.status === 'Agent Bidding').length, color: 'bg-brand-teal' },
+                    { label: 'Contracting', count: (listingRequests || []).filter(r => r.status === 'Contracting').length, color: 'bg-blue-500' },
+                    { label: 'Closed', count: (listingRequests || []).filter(r => r.status === 'Closed' || r.status === 'Completed').length, color: 'bg-emerald-500' },
+                    { label: 'Total', count: (listingRequests || []).length, color: 'bg-brand-teal' },
+                  ].map(st => (
+                    <div key={st.label} className="bg-zinc-900 p-2 text-center border border-zinc-800">
+                      <div className="flex items-center justify-center gap-1.5 mb-1">
+                        <span className={cn("w-1.5 h-1.5 rounded-full animate-pulse", st.color)} />
+                        <span className="text-[8px] font-black uppercase text-zinc-400 tracking-wider font-display max-sm:hidden">{st.label}</span>
+                      </div>
+                      <span className="text-sm font-display font-black text-white">{st.count}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               {listingRequests.length === 0 ? (
                 <div className="py-20 flex flex-col items-center gap-4 text-center">
                   <div className="w-20 h-20 bg-brand-gray border-4 border-brand-black flex items-center justify-center rounded-full">
@@ -410,17 +536,8 @@ export default function Profile({ initialView = 'main' }: { initialView?: 'main'
                 </div>
               ) : (
                 <div className="flex flex-col gap-4">
-                  <div className="flex items-center justify-between mt-2 mb-2">
-                    <h3 className="text-2xl font-display font-black uppercase italic">Your Listings</h3>
-                    <button
-                      onClick={() => handleAction('Request Listing')}
-                      className="bg-brand-black text-white px-4 py-2 border-2 border-brand-black hover:bg-brand-teal hover:text-brand-black transition-all shadow-brutal-sm hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none flex items-center gap-2 text-xs font-black uppercase tracking-wide"
-                    >
-                      <PlusCircle size={14} /> Add Listing
-                    </button>
-                  </div>
                   <div className="bg-brand-black text-white p-3 border-b-4 border-brand-teal flex justify-between items-center text-left">
-                    <h2 className="text-[10px] font-black uppercase tracking-[0.2em] leading-tight">Listing Pipeline Status</h2>
+                    <h2 className="text-[10px] font-black uppercase tracking-[0.2em] leading-tight font-display">Listing Pipeline Detail</h2>
                     <span className="text-[8px] font-black uppercase opacity-60 text-right max-w-[50%]">
                       {isSubscriber ? 'Auto-Renewal Enabled' : 'Manual Renewal Required (30 Days)'}
                     </span>
@@ -430,6 +547,7 @@ export default function Profile({ initialView = 'main' }: { initialView?: 'main'
                     const isExpired = daysLeft <= 0;
                     const isEditing = editingListing === req.id;
                     const isViewingMetrics = viewingMetrics === req.id;
+                    const bids = req.agentBids || [];
                     
                     return (
                       <div key={req.id} className={cn(
@@ -509,11 +627,9 @@ export default function Profile({ initialView = 'main' }: { initialView?: 'main'
                                 <h3 className="font-display font-black uppercase text-lg leading-tight dark:text-brand-gray">{req.title}</h3>
                                 {(req.commission !== undefined || (req.documents && req.documents.length > 0)) && (
                                   <div className="flex gap-2">
-                                    {req.commission !== undefined && (
-                                      <span className="text-[8px] font-black uppercase bg-brand-black text-brand-teal px-1 border border-brand-teal">
-                                        Comm: {req.commission}%
-                                      </span>
-                                    )}
+                                    <span className="text-[8px] font-black uppercase bg-brand-black text-brand-teal px-1 border border-brand-teal">
+                                      Comm: 5%
+                                    </span>
                                     {req.documents && req.documents.length > 0 && (
                                       <span className="text-[8px] font-black uppercase bg-brand-teal text-brand-black px-1 border border-brand-black">
                                         {req.documents.length} Docs Attached
@@ -644,6 +760,96 @@ export default function Profile({ initialView = 'main' }: { initialView?: 'main'
                                 >
                                   {req.isBoosted ? "Boost Active" : "Boost Listing (20 TKNS)"}
                                 </button>
+                          </div>
+                        )}
+
+                        {/* Expandable Bidding Review Block */}
+                        {req.status === 'Agent Bidding' && (
+                          <div className="mt-4 pt-4 border-t-2 border-dashed border-zinc-200 dark:border-zinc-800">
+                            <div className="flex justify-between items-center mb-2">
+                              <div>
+                                <h4 className="text-[10px] font-black uppercase text-zinc-400">Competitive Agent Bidding</h4>
+                                <p className="text-xs font-bold text-zinc-700 dark:text-zinc-300">{bids.length} bids submitted by active agents</p>
+                              </div>
+                              <button
+                                onClick={() => setReviewingId(reviewingId === req.id ? null : req.id)}
+                                className={cn(
+                                  "px-3 py-1.5 text-[10px] font-black uppercase tracking-wider border-2 border-brand-black transition-all",
+                                  reviewingId === req.id
+                                    ? "bg-brand-black text-white"
+                                    : "bg-brand-teal text-brand-black hover:bg-teal-400 shadow-brutal-xs"
+                                )}
+                              >
+                                {reviewingId === req.id ? 'Close Bids' : 'Review Bids'}
+                              </button>
+                            </div>
+
+                            {reviewingId === req.id && (
+                              <div className="bg-zinc-50 dark:bg-zinc-950 p-4 border-2 border-brand-black mt-2 space-y-4">
+                                {bids.length === 0 ? (
+                                  <p className="text-[10px] text-zinc-400 italic">No agent bids submitted yet. Agents are actively preparing pitches!</p>
+                                ) : (
+                                  <div className="space-y-3">
+                                    {bids.map((bid: any) => (
+                                      <div key={bid.id} className={cn(
+                                        "bg-white dark:bg-zinc-900 border-2 p-3 shadow-brutal-xs relative overflow-hidden flex flex-col gap-2",
+                                        bid.status === 'Accepted' ? "border-emerald-500" : (bid.status === 'Rejected' ? "border-zinc-300 opacity-60" : "border-brand-black")
+                                      )}>
+                                        <div className="flex justify-between items-start">
+                                          <div>
+                                            <div className="flex items-center gap-1.5">
+                                              <span className="font-display font-black uppercase text-xs text-zinc-900 dark:text-white">{bid.agentName}</span>
+                                              <span className={cn(
+                                                "px-1 py-0.5 text-[8px] font-black uppercase border border-brand-black",
+                                                bid.agentTier === 'Verified Professional' ? "bg-brand-teal text-brand-black" : "bg-zinc-300 text-brand-black"
+                                              )}>
+                                                {bid.agentTier === 'Verified Professional' ? 'Verified Pro' : 'Platform Agent'}
+                                              </span>
+                                            </div>
+                                            {bid.agentRegNumber && (
+                                              <p className="text-[8px] font-mono text-zinc-400 uppercase mt-0.5">Reg No: {bid.agentRegNumber}</p>
+                                            )}
+                                          </div>
+                                          
+                                          {bid.status === 'Pending' ? (
+                                            <div className="flex gap-1">
+                                              <button
+                                                onClick={() => handleAcceptBid(req.id, bid.id)}
+                                                className="bg-emerald-500 text-white hover:bg-emerald-600 px-2 py-1 text-[8px] font-black uppercase border-2 border-brand-black transition-all shadow-brutal-xs active:translate-y-0.5"
+                                              >
+                                                Accept
+                                              </button>
+                                              <button
+                                                onClick={() => handleDeclineBid(req.id, bid.id)}
+                                                className="bg-brand-red text-white hover:bg-red-650 px-2 py-1 text-[8px] font-black uppercase border-2 border-brand-black transition-all shadow-brutal-xs active:translate-y-0.5"
+                                              >
+                                                Reject
+                                              </button>
+                                            </div>
+                                          ) : (
+                                            <span className={cn(
+                                              "text-[8px] font-black uppercase px-2 py-1 border border-brand-black",
+                                              bid.status === 'Accepted' ? "bg-emerald-50 text-emerald-800 border-emerald-300" : "bg-zinc-100 text-zinc-500 border-zinc-200"
+                                            )}>
+                                              {bid.status}
+                                            </span>
+                                          )}
+                                        </div>
+
+                                        <p className="text-xs italic text-zinc-600 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-800 p-2 border-l-2 border-brand-teal">
+                                          &ldquo;{bid.coverageNote}&rdquo;
+                                        </p>
+
+                                        <div className="flex justify-between items-center text-[8px] font-mono uppercase text-zinc-400 border-t border-dashed border-zinc-200 dark:border-zinc-800 pt-1.5">
+                                          <span>Distance: {bid.distanceKm ? `${bid.distanceKm} km` : '1.5 km'}</span>
+                                          <span>Commission: 5% Platform rate</span>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -1280,6 +1486,7 @@ export default function Profile({ initialView = 'main' }: { initialView?: 'main'
                 <div className="mb-3">
                   {renderStars(user.rating || 4.5)}
                 </div>
+                {renderRoleTierBadges(user)}
                 <div className="flex flex-wrap gap-2 mb-2">
                   <span className={cn(
                     "text-[9px] font-black uppercase px-2 py-0.5 border border-white/20 flex items-center gap-1",
@@ -1398,18 +1605,163 @@ export default function Profile({ initialView = 'main' }: { initialView?: 'main'
         </motion.div>
       )}
 
+      {/* Agent Credentials Section */}
+      {user.role === 'Agent' && (
+        <section className="bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 p-6 shadow-aggressive flex flex-col gap-4">
+          <div className="flex items-center gap-2 border-b-2 border-brand-black pb-3">
+             <Briefcase className="text-brand-teal" size={24} />
+             <h3 className="text-xl font-display font-black uppercase">Agent Credentials</h3>
+          </div>
+
+          <div className="flex justify-between items-center bg-zinc-50 dark:bg-zinc-800 p-3 border-2 border-brand-black shadow-brutal-xs">
+            <div>
+              <p className="text-[10px] font-black uppercase text-zinc-400">Current Corporate Tier</p>
+              <p className="text-base font-black uppercase italic text-brand-teal">{user.agentTier || 'Platform Agent'}</p>
+            </div>
+            {user.agentTier === 'Verified Professional' ? (
+              <span className={cn(
+                "px-2 py-1 text-[9px] font-black uppercase border",
+                user.agentVerificationStatus === 'Verified' ? "bg-emerald-500 text-black border-black" : "bg-amber-400 text-brand-black border-black animate-pulse"
+              )}>
+                {user.agentVerificationStatus || 'Pending'}
+              </span>
+            ) : (
+              <span className="px-2 py-1 text-[9px] font-black uppercase bg-zinc-300 text-brand-black border border-black">
+                Platform Standard
+              </span>
+            )}
+          </div>
+
+          {user.agentTier === 'Verified Professional' ? (
+            <div className="space-y-3">
+              <div className="bg-zinc-50 dark:bg-zinc-800 p-3 border-2 border-brand-black shadow-brutal-xs">
+                <p className="text-[10px] font-black uppercase text-zinc-400">Agent Registration Number</p>
+                <p className="text-lg font-mono font-black">{user.agentRegNumber || 'N/A'}</p>
+              </div>
+
+              {user.agentVerificationStatus === 'Pending' && (
+                <div className="bg-amber-500/10 border-2 border-amber-500 text-amber-500 p-3 flex gap-2 items-start">
+                  <div className="w-1.5 h-1.5 bg-amber-500 mt-1.5 shrink-0 rounded-full" />
+                  <p className="text-[10px] font-bold uppercase tracking-tight leading-relaxed">
+                    Your registration number is being reviewed by the RealAgents team. Expected: 48 hours.
+                  </p>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="bg-brand-gray dark:bg-zinc-800 border-4 border-brand-black dark:border-zinc-700 p-4 shadow-brutal-sm">
+              <h4 className="text-sm font-display font-black uppercase text-brand-black dark:text-brand-teal mb-1">Upgrade to Verified Professional</h4>
+              <p className="text-[10px] text-zinc-500 uppercase tracking-tight mb-4 leading-relaxed">
+                Verified Professionals unlock premium badges, direct high-value broker pipelines, and rank higher in automated AI matchmaking reports.
+              </p>
+              
+              <div className="flex gap-2">
+                <input 
+                  type="text" 
+                  id="regNumInput"
+                  placeholder="Enter CAC/Reg. Number (e.g., RE-85920)"
+                  className="brutalist-input text-xs flex-1 bg-white"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      const input = e.currentTarget;
+                      const val = input.value.trim();
+                      if (val) {
+                        updateUser({
+                          agentTier: 'Verified Professional',
+                          agentVerificationStatus: 'Pending',
+                          agentRegNumber: val
+                        });
+                      }
+                    }
+                  }}
+                />
+                <button 
+                  onClick={() => {
+                    const input = document.getElementById('regNumInput') as HTMLInputElement;
+                    const val = input?.value?.trim();
+                    if (val) {
+                      updateUser({
+                        agentTier: 'Verified Professional',
+                        agentVerificationStatus: 'Pending',
+                        agentRegNumber: val
+                      });
+                    } else {
+                      alert("Please enter a valid registration number");
+                    }
+                  }}
+                  className="brutalist-button-teal text-[10px] h-auto px-4 font-black uppercase shadow-brutal-xs"
+                >
+                  Submit
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Trust Score & Stats Panel */}
+          <div className="grid grid-cols-3 gap-3 border-t-2 border-dashed border-zinc-200 dark:border-zinc-800 pt-4">
+             <div className="bg-zinc-50 dark:bg-zinc-800 p-2 text-center border border-brand-black">
+                <p className="text-[8px] font-black uppercase text-zinc-400">Trust Score</p>
+                <p className="text-sm font-black text-brand-teal">{user.profileScore}%</p>
+             </div>
+             <div className="bg-zinc-50 dark:bg-zinc-800 p-2 text-center border border-brand-black">
+                <p className="text-[8px] font-black uppercase text-zinc-400">Sold Listings</p>
+                <p className="text-sm font-black text-brand-black dark:text-white">{user.propertiesSold || 5}</p>
+             </div>
+             <div className="bg-zinc-50 dark:bg-zinc-800 p-2 text-center border border-brand-black">
+                <p className="text-[8px] font-black uppercase text-zinc-400">Bids Won</p>
+                <p className="text-sm font-black text-brand-black dark:text-white">{user.bidsWon || 12}</p>
+             </div>
+          </div>
+        </section>
+      )}
+
+      {/* Buyer Quick Access Panels */}
+      {user.role === 'Buyer' && (
+        <section className="grid grid-cols-2 gap-4 select-none">
+          <button 
+            onClick={() => handleAction('Saved Properties')}
+            className="bg-brand-black text-white p-4 border-4 border-brand-black hover:border-brand-teal hover:text-brand-teal text-left shadow-brutal-sm hover:translate-y-0.5 transition-all relative flex flex-col gap-2"
+          >
+            <div className="flex justify-between items-center w-full">
+              <Heart size={24} className="text-brand-red fill-current" />
+              <span className="text-xs font-black bg-zinc-850 text-brand-teal border border-brand-teal px-1.5 py-0.5">{savedProperties?.length || 0} ITEMS</span>
+            </div>
+            <div>
+              <p className="text-xs font-display font-black uppercase tracking-tight">Saved Properties</p>
+              <p className="text-[8px] uppercase text-zinc-500 font-bold">Your prospective deals</p>
+            </div>
+          </button>
+
+          <button 
+            onClick={() => handleAction('Viewed History')}
+            className="bg-brand-black text-white p-4 border-4 border-brand-black hover:border-brand-teal hover:text-brand-teal text-left shadow-brutal-sm hover:translate-y-0.5 transition-all relative flex flex-col gap-2"
+          >
+            <div className="flex justify-between items-center w-full">
+              <History size={24} className="text-brand-teal" />
+              <span className="text-xs font-black bg-zinc-850 text-zinc-400 border border-zinc-700 px-1.5 py-0.5">{(viewedProperties || []).length} VISITED</span>
+            </div>
+            <div>
+              <p className="text-xs font-display font-black uppercase tracking-tight">Viewed History</p>
+              <p className="text-[8px] uppercase text-zinc-500 font-bold">Recently checked properties</p>
+            </div>
+          </button>
+        </section>
+      )}
+
       {/* Quick Actions Grid */}
-      <section className="grid grid-cols-2 gap-4">
-        <ActionButton 
-          icon={<PlusCircle className="text-brand-red" />} 
-          label="Request Listing" 
-          subLabel="Submit property"
-          onClick={() => handleAction('Request Listing')}
-        />
+      <section className={cn("grid gap-4", user.role === 'Seller' ? "grid-cols-2" : "grid-cols-1")}>
+        {user.role === 'Seller' && (
+          <ActionButton 
+            icon={<PlusCircle className="text-brand-red" />} 
+            label="List Property" 
+            subLabel="Submit property request"
+            onClick={() => handleAction('Request Listing')}
+          />
+        )}
         <ActionButton 
           icon={<Edit3 className="text-brand-teal" />} 
           label="Customize Profile" 
-          subLabel="Agent Resume & Info"
+          subLabel={user.role === 'Agent' ? "Agent Resume & Info" : "Personal Preferences & Info"}
           onClick={() => handleAction('Customize Profile')}
         />
       </section>
@@ -1418,8 +1770,8 @@ export default function Profile({ initialView = 'main' }: { initialView?: 'main'
       <section className="flex flex-col gap-2">
         <h3 className="text-xs font-display font-black uppercase text-zinc-400 tracking-widest pl-2">Personal Management</h3>
         <div className="brutalist-card p-2 flex flex-col divide-y-2 divide-zinc-100 dark:divide-zinc-800">
-          <ListOption icon={<Heart size={18} />} label="Saved Properties" onClick={() => handleAction('Saved Properties')} />
-          <ListOption icon={<History size={18} />} label="Viewed History" onClick={() => handleAction('Viewed History')} />
+          {user.role !== 'Buyer' && <ListOption icon={<Heart size={18} />} label="Saved Properties" onClick={() => handleAction('Saved Properties')} />}
+          {user.role !== 'Buyer' && <ListOption icon={<History size={18} />} label="Viewed History" onClick={() => handleAction('Viewed History')} />}
           <ListOption icon={<Bell size={18} />} label="Price Alerts" badge="05" onClick={() => handleAction('Price Alerts')} />
           
           <div className="flex items-center justify-between p-3 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors w-full border-t-2 border-zinc-100 dark:border-zinc-800">
@@ -1781,6 +2133,12 @@ function StatusBadge({ status }: { status: ListingStatus }) {
       bg: 'bg-zinc-100 dark:bg-zinc-800', 
       text: 'text-zinc-500', 
       border: 'border-zinc-300 dark:border-zinc-600' 
+    },
+    'Agent Bidding': {
+      icon: <Dices size={10} />,
+      bg: 'bg-indigo-100 dark:bg-indigo-900/30',
+      text: 'text-indigo-600 dark:text-indigo-400',
+      border: 'border-indigo-400/50'
     },
     'Inspection Scheduled': { 
       icon: <Calendar size={10} />, 
