@@ -8,6 +8,8 @@ import {
 import { AnimatePresence, motion } from 'motion/react';
 import { Property } from '../types';
 import { formatCurrency, cn } from '../lib/utils';
+import { MapContainer, TileLayer, Marker } from 'react-leaflet';
+import L from 'leaflet';
 import { mockProperties } from '../data/mockListings';
 import InteractiveMap from './InteractiveMap';
 import ComparisonTable from './ComparisonTable';
@@ -211,6 +213,74 @@ export default function PropertyDetail({
                 <MapPin size={20} className="text-brand-red" />
                 <span>{property.location.address || `${property.location.area}, ${property.location.city}`}</span>
               </div>
+
+              {/* Optional verification pin static map thumbnail */}
+              {(() => {
+                const storedPin = (property as any).googlePinLink || (property as any).listingRequirements?.locationPin;
+                if (!storedPin) return null;
+                
+                if (storedPin.startsWith('pin:')) {
+                  const coordsPart = storedPin.substring(4);
+                  const [latStr, lngStr] = coordsPart.split(',');
+                  const lat = parseFloat(latStr);
+                  const lng = parseFloat(lngStr);
+                  
+                  if (isNaN(lat) || isNaN(lng)) return null;
+                  
+                  return (
+                    <div className="mt-4 border-4 border-brand-black p-4 bg-white dark:bg-zinc-900 shadow-brutal-sm">
+                      <span className="block text-[9px] font-black uppercase text-zinc-500 mb-1 flex items-center gap-1">
+                        <ShieldCheck size={12} className="text-brand-teal" /> Verified Geolocation Coordinates
+                      </span>
+                      <div className="w-full h-44 relative border-2 border-brand-black z-0">
+                        <MapContainer
+                          center={[lat, lng]}
+                          zoom={15}
+                          zoomControl={false}
+                          dragging={false}
+                          touchZoom={false}
+                          doubleClickZoom={false}
+                          scrollWheelZoom={false}
+                          boxZoom={false}
+                          keyboard={false}
+                          className="w-full h-full"
+                        >
+                          <TileLayer
+                            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                          />
+                          <Marker 
+                            position={[lat, lng]} 
+                            icon={L.divIcon({
+                              html: '<div style="font-size: 24px; line-height: 1;">📍</div>',
+                              iconSize: [24, 24],
+                              iconAnchor: [12, 24],
+                              className: 'custom-div-icon'
+                            })}
+                          />
+                        </MapContainer>
+                      </div>
+                      <p className="text-[9px] font-mono text-zinc-500 mt-2 uppercase">
+                        SECURED LAT/LNG: {lat.toFixed(6)}, {lng.toFixed(6)}
+                      </p>
+                    </div>
+                  );
+                } else if (storedPin.startsWith('http://') || storedPin.startsWith('https://')) {
+                  return (
+                    <div className="mt-3">
+                      <a 
+                        href={storedPin}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase text-white hover:brightness-110 bg-brand-black hover:bg-zinc-800 p-2.5 border-2 border-brand-black transition-all shadow-brutal-sm"
+                      >
+                        Open Verified Location on External Map <ExternalLink size={12} />
+                      </a>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
             </div>
 
             <div className="bg-brand-black text-white p-6 border-4 border-brand-teal flex flex-col gap-4 shadow-aggressive">
@@ -306,9 +376,18 @@ export default function PropertyDetail({
                     <img src={property.agent.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed=Musa"} alt={property.agent.name} />
                   </div>
                   <div>
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <h4 className="text-lg leading-none group-hover:text-brand-teal transition-colors font-bold">{property.agent.name}</h4>
-                      <ShieldCheck size={16} className="text-blue-500" />
+                      <ShieldCheck size={16} className="text-blue-500 shrink-0" />
+                      {property.agent.agentTier === 'Verified Professional' ? (
+                        <span className="px-1.5 py-0.5 text-[8px] font-black uppercase border border-brand-black bg-brand-teal text-brand-black shrink-0">
+                          VERIFIED PROFESSIONAL
+                        </span>
+                      ) : (
+                        <span className="px-1.5 py-0.5 text-[8px] font-black uppercase border border-brand-black bg-zinc-300 dark:bg-zinc-700 text-zinc-900 dark:text-zinc-200 shrink-0">
+                          PLATFORM AGENT
+                        </span>
+                      )}
                     </div>
                     <p className="text-[10px] font-bold text-zinc-500 uppercase mt-1">{property.agent.specialization}</p>
                     <div className="flex items-center gap-1 mt-1">

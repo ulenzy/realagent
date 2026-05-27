@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Heart, FileText, Gavel } from 'lucide-react';
-import Profile from './Profile';
+import WishlistView from './WishlistView';
+import MyListingsView from './MyListingsView';
 import AgentBidding from './AgentBidding';
 
 interface MySpaceProps {
@@ -59,10 +60,10 @@ export default function MySpace({ defaultActiveSubTab }: MySpaceProps) {
       {/* Content wrapper */}
       <div className="flex-1 w-full max-w-5xl mx-auto px-4">
         {activeSubTab === 'Wishlist' && (
-          <Profile initialView="Saved Properties" />
+          <WishlistView />
         )}
         {activeSubTab === 'My Listings' && (
-          <Profile initialView="My Listings" />
+          <MyListingsView />
         )}
         {activeSubTab === 'Bids' && (
           <AgentBidding />

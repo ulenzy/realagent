@@ -11,7 +11,7 @@ import {
 import { auth, googleProvider, facebookProvider } from '../lib/firebase';
 import { doc, getDoc, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove, collection, query, where, addDoc, Timestamp } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { User, ListingRequest, Transaction } from '../types';
+import { User, ListingRequest, Transaction, Property, ListingType, AgentTier, ROILevel, AreaTrend } from '../types';
 
 interface AuthContextType {
   user: User | null;
@@ -19,6 +19,7 @@ interface AuthContextType {
   loading: boolean;
   error: string | null;
   listingRequests: ListingRequest[];
+  platformListings: ListingRequest[];
   savedProperties: string[];
   signInWithGoogle: () => Promise<void>;
   signInWithFacebook: () => Promise<void>;
@@ -42,9 +43,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [listingRequests, setListingRequests] = useState<ListingRequest[]>([]);
+  const [platformListings, setPlatformListings] = useState<ListingRequest[]>([]);
   const [savedProperties, setSavedProperties] = useState<string[]>([]);
   const unsubscribeUserRef = React.useRef<(() => void) | null>(null);
   const unsubscribeListingsRef = React.useRef<(() => void) | null>(null);
+  const unsubscribePlatformListingsRef = React.useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (isLocalGuest) {
@@ -79,9 +82,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setFirebaseUser({ uid: 'guest_local_user', isAnonymous: true, email: null } as any);
       const localListings = localStorage.getItem('localGuestListings');
       if (localListings) {
-        setListingRequests(JSON.parse(localListings));
+        const parsedListings = JSON.parse(localListings);
+        setListingRequests(parsedListings);
+        setPlatformListings(parsedListings.filter((l: any) => l.status === 'Agent Bidding'));
       } else {
         setListingRequests([]);
+        setPlatformListings([]);
       }
       setLoading(false);
       return;
@@ -122,6 +128,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }, (err) => {
               console.error("Listings dynamic snapshot error:", err);
             });
+
+            // Platform listings query (runs independently of user's own listings)
+            if (unsubscribePlatformListingsRef.current) {
+              unsubscribePlatformListingsRef.current();
+            }
+
+            const platformQuery = query(collection(db, 'properties'), where('status', '==', 'Agent Bidding'));
+            unsubscribePlatformListingsRef.current = onSnapshot(platformQuery, (snapshot) => {
+              const pListings = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+              } as any));
+              setPlatformListings(pListings);
+            }, (err) => {
+              console.error("Platform listings snapshot error:", err);
+            });
           } else {
             // Initial profile creation
             const nameParts = (fUser.displayName || '').trim().split(/\s+/);
@@ -155,8 +177,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } else {
         if (unsubscribeUserRef.current) unsubscribeUserRef.current();
         if (unsubscribeListingsRef.current) unsubscribeListingsRef.current();
+        if (unsubscribePlatformListingsRef.current) unsubscribePlatformListingsRef.current();
         setUser(null);
         setListingRequests([]);
+        setPlatformListings([]);
         setSavedProperties([]);
         setLoading(false);
       }
@@ -166,6 +190,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       unsubscribeAuth();
       if (unsubscribeUserRef.current) unsubscribeUserRef.current();
       if (unsubscribeListingsRef.current) unsubscribeListingsRef.current();
+      if (unsubscribePlatformListingsRef.current) unsubscribePlatformListingsRef.current();
     };
   }, [isLocalGuest]);
 
@@ -193,6 +218,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem('localGuestUser', JSON.stringify(guestUser));
     setFirebaseUser({ uid: 'guest_local_user', isAnonymous: true, email: null } as any);
     setListingRequests([]);
+    setPlatformListings([]);
     setIsLocalGuest(true);
     localStorage.setItem('isLocalGuest', 'true');
     setLoading(false);
@@ -242,6 +268,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem('localGuestUser', JSON.stringify(googleUser));
     setFirebaseUser({ uid: 'google_local_user', isAnonymous: false, email: 'user@gmail.com', displayName: 'Google User' } as any);
     setListingRequests([]);
+    setPlatformListings([]);
     setIsLocalGuest(true);
     localStorage.setItem('isLocalGuest', 'true');
     setLoading(false);
@@ -291,6 +318,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem('localGuestUser', JSON.stringify(facebookUser));
     setFirebaseUser({ uid: 'facebook_local_user', isAnonymous: false, email: 'user@facebook.com', displayName: 'Facebook User' } as any);
     setListingRequests([]);
+    setPlatformListings([]);
     setIsLocalGuest(true);
     localStorage.setItem('isLocalGuest', 'true');
     setLoading(false);
@@ -316,6 +344,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUser(null);
         setFirebaseUser(null);
         setListingRequests([]);
+        setPlatformListings([]);
         setSavedProperties([]);
         setLoading(false);
         return;
@@ -356,6 +385,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (isLocalGuest) {
       const updatedListings = [...listingRequests, { ...request, ownerId: user.id }];
       setListingRequests(updatedListings);
+      setPlatformListings(updatedListings.filter(item => item.status === 'Agent Bidding'));
       localStorage.setItem('localGuestListings', JSON.stringify(updatedListings));
       return;
     }
@@ -369,17 +399,150 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const promoteToProperty = async (listingRequest: ListingRequest) => {
+    // 1. Set dates
+    const nowStr = new Date().toISOString();
+    const expiresAtStr = new Date(Date.now() + 30 * 86400000).toISOString();
+
+    // 2. Location
+    const parts = (listingRequest.location || '').split(',');
+    const area = parts[0]?.trim() || '';
+    const state = parts[1]?.trim() || '';
+
+    // 3. Fetch agent info if not in guest mode
+    let agentObj = {
+      id: listingRequest.assignedAgentId || 'a1',
+      name: 'Professional Agent',
+      verified: true,
+      avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=ProfessionalAgent',
+      trustScore: 95,
+      rating: 5,
+      specialization: 'Verified Agent',
+      responseTime: '< 30 mins',
+      propertiesSold: 12,
+      agentTier: 'Platform Agent' as AgentTier
+    };
+
+    if (listingRequest.assignedAgentId && !isLocalGuest) {
+      try {
+        const agentDoc = await getDoc(doc(db, 'users', listingRequest.assignedAgentId));
+        if (agentDoc.exists()) {
+          const u = agentDoc.data();
+          agentObj = {
+            id: u.id,
+            name: u.name || `${u.firstName || ''} ${u.lastName || ''}`.trim() || 'Professional Agent',
+            verified: u.kycStatus === 'Verified',
+            avatar: u.avatarUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.name || 'Musa'}`,
+            trustScore: u.profileScore || 85,
+            rating: u.rating || 5,
+            specialization: u.specializationArea || 'Real Estate Consultant',
+            responseTime: u.onlineHours || 'Within 1 hour',
+            propertiesSold: u.propertiesSold || 12,
+            agentTier: u.agentTier || 'Platform Agent'
+          };
+        }
+      } catch (err) {
+        console.error("Failed to fetch agent profile for property promotion:", err);
+      }
+    }
+
+    const newPropertyData = {
+      title: listingRequest.title || 'Approved Property',
+      type: listingRequest.type || 'House',
+      price: listingRequest.price || 0,
+      listingType: 'Sale' as ListingType,
+      sizeSqm: 850,
+      bedrooms: 5,
+      bathrooms: 6,
+      estateName: 'Golden Gate Estate',
+      location: {
+        state: state || 'Lagos',
+        city: area || 'Ikeja',
+        area: area || 'Ikeja',
+        address: listingRequest.googlePinLink || `${area}, ${state}`
+      },
+      image: '/regenerated_image_1778928319302.png',
+      gallery: [
+        '/regenerated_image_1778928319302.png',
+        'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&q=80&w=800'
+      ],
+      agent: agentObj,
+      roiPotential: 'High' as ROILevel,
+      developmentInsight: {
+        infrastructureGrowth: 'High' as ROILevel,
+        areaTrend: 'Emerging Hot Zone' as AreaTrend,
+        nearbyKeyAdditions: ['Primary School', 'Shopping Mall'],
+        expectedAppreciation: '20% Annually',
+        aiSummary: 'This location is experiencing rapid infrastructure expansion and solid investment stability.',
+        score: 85
+      },
+      estateIntelligence: {
+        infrastructureScore: 80,
+        securityRating: 90,
+        powerReliability: 85,
+        roadAccessibility: 85,
+        internetCoverage: 80,
+        waterAvailability: 85,
+        appreciationTrend: 18,
+        rentalDemand: 8,
+        livabilityScore: 85
+      },
+      aiInsights: [],
+      amenities: ['Electricity', 'Security', 'Road Accessibility'],
+      createdAt: nowStr,
+      expiresAt: expiresAtStr,
+      commission: listingRequest.commission || 5,
+      acceptsDownPayment: listingRequest.acceptsDownPayment || false,
+      listingRequirements: listingRequest.listingRequirements || {},
+      isPromotedProperty: true,
+      assignedAgentId: listingRequest.assignedAgentId || null
+    };
+
+    if (isLocalGuest) {
+      const guestProps = localStorage.getItem('localGuestProperties') || '[]';
+      const parsedProps = JSON.parse(guestProps);
+      const guestPropDoc = { id: `prop-${Date.now()}`, ...newPropertyData };
+      parsedProps.push(guestPropDoc);
+      localStorage.setItem('localGuestProperties', JSON.stringify(parsedProps));
+      window.dispatchEvent(new Event('local_guest_properties_updated'));
+    } else {
+      try {
+        const newDocRef = doc(collection(db, 'properties'));
+        await setDoc(newDocRef, newPropertyData);
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, 'properties');
+      }
+    }
+  };
+
   const updateListingRequest = async (id: string, updates: Partial<ListingRequest>) => {
     if (isLocalGuest) {
       const updatedListings = listingRequests.map(item => 
         item.id === id ? { ...item, ...updates } : item
       );
       setListingRequests(updatedListings);
+      setPlatformListings(updatedListings.filter(item => item.status === 'Agent Bidding'));
       localStorage.setItem('localGuestListings', JSON.stringify(updatedListings));
+
+      if (updates.status === 'Approved') {
+        const listing = updatedListings.find(item => item.id === id);
+        if (listing) {
+          promoteToProperty(listing);
+        }
+      }
       return;
     }
     try {
       await updateDoc(doc(db, 'properties', id), updates);
+
+      if (updates.status === 'Approved') {
+        const docRef = doc(db, 'properties', id);
+        const snap = await getDoc(docRef);
+        if (snap.exists()) {
+          const listingRequest = { id: snap.id, ...snap.data(), ...updates } as ListingRequest;
+          await promoteToProperty(listingRequest);
+        }
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `properties/${id}`);
     }
@@ -431,7 +594,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   return (
     <AuthContext.Provider value={{ 
-      user, firebaseUser, loading, error, listingRequests, savedProperties,
+      user, firebaseUser, loading, error, listingRequests, platformListings, savedProperties,
       signInWithGoogle, signInWithFacebook, signInAsGuest, signInWithGoogleMock, signInWithFacebookMock, logout,
       toggleSavedProperty, addListingRequest, updateListingRequest, updateUser, addTransaction
     }}>

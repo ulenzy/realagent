@@ -7,7 +7,8 @@ import {
   ArrowDownWideNarrow, Verified, Heart, ShieldAlert, Banknote, MessageSquare
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { mockProperties } from '../data/mockListings';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { cn, formatCurrency, formatNumber, formatNumberString, parseFormattedNumber } from '../lib/utils';
 import { ROILevel, Property } from '../types';
 import Slider from 'rc-slider';
@@ -55,7 +56,7 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigation } from '../context/NavigationContext';
 
 export default function Marketplace() {
-  const { savedProperties, toggleSavedProperty: onToggleSave } = useAuth();
+  const { savedProperties, toggleSavedProperty: onToggleSave, isLocalGuest } = useAuth();
   const { handleSelectProperty: onSelectProperty, setSelectedAgentId: onViewAgentProfile } = useNavigation();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -68,14 +69,49 @@ export default function Marketplace() {
   
   const searchRef = useRef<HTMLDivElement>(null);
 
+  const [liveProperties, setLiveProperties] = useState<Property[]>([]);
+
+  useEffect(() => {
+    if (isLocalGuest) {
+      const loadLocalProps = () => {
+        const saved = localStorage.getItem('localGuestProperties');
+        if (saved) {
+          setLiveProperties(JSON.parse(saved));
+        } else {
+          setLiveProperties([]);
+        }
+      };
+      loadLocalProps();
+      window.addEventListener('local_guest_properties_updated', loadLocalProps);
+      return () => window.removeEventListener('local_guest_properties_updated', loadLocalProps);
+    }
+
+    const q = query(
+      collection(db, 'properties'),
+      where('isPromotedProperty', '==', true)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const nowStr = new Date().toISOString();
+      const list = snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() } as any))
+        .filter((p: any) => p.expiresAt > nowStr);
+      setLiveProperties(list);
+    }, (error) => {
+      console.error("Firestore error loading marketplace live properties: ", error);
+    });
+
+    return () => unsubscribe();
+  }, [isLocalGuest]);
+
   const availableStates = useMemo(() => {
-    return ['any', ...new Set(mockProperties.map(p => p.location.state))];
-  }, []);
+    return ['any', ...new Set(liveProperties.map(p => p.location.state))];
+  }, [liveProperties]);
 
   const availableCities = useMemo(() => {
-    let propertiesToCount = mockProperties;
+    let propertiesToCount = liveProperties;
     if (filters.state !== 'any') {
-      propertiesToCount = mockProperties.filter(p => p.location.state === filters.state);
+      propertiesToCount = liveProperties.filter(p => p.location.state === filters.state);
     }
     
     const areas = propertiesToCount.map(p => p.location.area);
@@ -85,12 +121,12 @@ export default function Marketplace() {
     }, {} as Record<string, number>);
 
     return [
-      { area: 'any', count: mockProperties.length },
+      { area: 'any', count: liveProperties.length },
       ...Object.entries(areaCounts)
-        .map(([area, count]) => ({ area, count }))
+        .map(([area, count]) => ({ area, count: count as number }))
         .sort((a, b) => b.count - a.count)
     ];
-  }, [filters.state]);
+  }, [liveProperties, filters.state]);
 
   // Close search suggestions on click outside
   useEffect(() => {
@@ -116,16 +152,16 @@ export default function Marketplace() {
   const searchSuggestions = useMemo(() => {
     if (!deferredSearchQuery) return [];
     const queries = deferredSearchQuery.toLowerCase();
-    const estates = [...new Set(mockProperties.map(p => p.estateName))].filter(e => e.toLowerCase().includes(queries));
-    const locations = [...new Set(mockProperties.map(p => p.location.area))].filter(l => l.toLowerCase().includes(queries));
-    const propertyTypes = [...new Set(mockProperties.map(p => p.type))].filter(t => t.toLowerCase().includes(queries));
+    const estates = Array.from(new Set(liveProperties.map(p => p.estateName || ''))).filter(e => (e as string).toLowerCase().includes(queries));
+    const locations = Array.from(new Set(liveProperties.map(p => p.location?.area || ''))).filter(l => (l as string).toLowerCase().includes(queries));
+    const propertyTypes = Array.from(new Set(liveProperties.map(p => p.type || ''))).filter(t => (t as string).toLowerCase().includes(queries));
     
     return [
-      ...estates.map(e => ({ type: 'Estate', value: e })), 
-      ...locations.map(l => ({ type: 'Location', value: l })),
-      ...propertyTypes.map(p => ({ type: 'Property Type', value: p }))
+      ...estates.map(e => ({ type: 'Estate', value: e as string })), 
+      ...locations.map(l => ({ type: 'Location', value: l as string })),
+      ...propertyTypes.map(p => ({ type: 'Property Type', value: p as string }))
     ].slice(0, 5);
-  }, [deferredSearchQuery]);
+  }, [deferredSearchQuery, liveProperties]);
 
   const toggleQuickFilter = (id: string) => {
     setSelectedQuickFilters(prev => 
@@ -134,25 +170,25 @@ export default function Marketplace() {
   };
 
   const filteredProperties = useMemo(() => {
-    let result = mockProperties.filter(p => {
+    let result = liveProperties.filter(p => {
       const qs = deferredSearchQuery.toLowerCase();
       const matchesSearch = p.title.toLowerCase().includes(qs) || 
-                           p.location.area.toLowerCase().includes(qs) ||
-                           p.estateName.toLowerCase().includes(qs);
+                           (p.location?.area || '').toLowerCase().includes(qs) ||
+                           (p.estateName || '').toLowerCase().includes(qs);
       
       const matchesPrice = p.price >= filters.priceRange[0] && p.price <= filters.priceRange[1];
-      const matchesSize = p.sizeSqm >= filters.sizeRange[0] && p.sizeSqm <= filters.sizeRange[1];
+      const matchesSize = (p.sizeSqm || 0) >= filters.sizeRange[0] && (p.sizeSqm || 0) <= filters.sizeRange[1];
       const matchesType = filters.propertyTypes.length === 0 || filters.propertyTypes.includes(p.type);
-      const matchesBeds = filters.bedrooms === 'any' || p.bedrooms >= (filters.bedrooms as number);
+      const matchesBeds = filters.bedrooms === 'any' || (p.bedrooms || 0) >= (filters.bedrooms as number);
       const matchesDistress = !filters.isDistressDeal || p.isDistressDeal;
       const matchesHot = !filters.isHotDeal || p.isHotDeal;
 
       // New Filters
       const matchesListingType = filters.listingType === 'any' || p.listingType === filters.listingType;
       const matchesDownPayment = !filters.acceptsDownPayment || p.acceptsDownPayment;
-      const matchesState = filters.state === 'any' || p.location.state === filters.state;
-      const matchesCity = filters.city === 'any' || p.location.area === filters.city;
-      const matchesVerifiedAgent = !filters.verifiedAgent || p.agent.verified;
+      const matchesState = filters.state === 'any' || p.location?.state === filters.state;
+      const matchesCity = filters.city === 'any' || p.location?.area === filters.city;
+      const matchesVerifiedAgent = !filters.verifiedAgent || p.agent?.verified;
       const matchesFurnishing = filters.furnishing.length === 0 || (p.furnishing && filters.furnishing.includes(p.furnishing));
 
       // Quick Filters
@@ -172,22 +208,22 @@ export default function Marketplace() {
     switch (activeSort) {
       case 'recommended':
         result.sort((a, b) => {
-          const aPriority = (a.agent.verified && a.isBoosted) ? 1 : 0;
-          const bPriority = (b.agent.verified && b.isBoosted) ? 1 : 0;
+          const aPriority = (a.agent?.verified && a.isBoosted) ? 1 : 0;
+          const bPriority = (b.agent?.verified && b.isBoosted) ? 1 : 0;
           if (aPriority !== bPriority) return bPriority - aPriority;
           return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
         });
         break;
       case 'price-low': result.sort((a, b) => a.price - b.price); break;
       case 'price-high': result.sort((a, b) => b.price - a.price); break;
-      case 'appreciation': result.sort((a, b) => b.appreciationScore - a.appreciationScore); break;
-      case 'yield': result.sort((a, b) => b.rentalYieldEstimate - a.rentalYieldEstimate); break;
+      case 'appreciation': result.sort((a, b) => (b.appreciationScore || 0) - (a.appreciationScore || 0)); break;
+      case 'yield': result.sort((a, b) => (b.rentalYieldEstimate || 0) - (a.rentalYieldEstimate || 0)); break;
       case 'newest':
       default: result.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     }
 
     return result;
-  }, [searchQuery, filters, selectedQuickFilters, activeSort]);
+  }, [liveProperties, searchQuery, filters, selectedQuickFilters, activeSort]);
 
   return (
     <div className="p-4 flex flex-col gap-6 relative min-h-screen pb-32">

@@ -44,10 +44,14 @@ service cloud.firestore {
       allow delete: if isOwner(userId);
     }
 
-    // --- Property Listings ---
+    // --- Property Listings & Promoted Properties ---
     match /properties/{propertyId} {
       function getUserData() {
         return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      }
+
+      function isPromoted(data) {
+        return data.get('isPromotedProperty', false) == true;
       }
 
       function isValidProperty(data, originalOwnerId) {
@@ -57,23 +61,39 @@ service cloud.firestore {
                && data.price is number && data.price >= 0;
       }
 
-      // Enforce: Users can read, update, or delete records depending on their role
-      allow list, get: if isSignedIn() && (
-        resource.data.ownerId == request.auth.uid || 
+      function isValidPromotedProperty(data) {
+        return isPromoted(data)
+               && data.title is string && data.title.size() <= 200
+               && data.price is number && data.price >= 0;
+      }
+
+      // Allow reads on promoted properties publicly, and on listing requests only for owners or agents
+      allow list, get: if (resource != null && resource.data != null && isPromoted(resource.data)) || (isSignedIn() && (
+        resource.data.get('ownerId', '') == request.auth.uid || 
         getUserData().role == 'Agent'
-      );
+      ));
       
-      allow create: if isSignedIn() && isValidId(propertyId) && isValidProperty(incoming(), request.auth.uid);
+      allow create: if isSignedIn() && (
+        (isPromoted(incoming()) && isValidPromotedProperty(incoming())) ||
+        (isValidId(propertyId) && isValidProperty(incoming(), request.auth.uid))
+      );
+
       allow update: if isSignedIn() && (
-        // Case 1: Owner total update
-        (isOwner(existing().ownerId) && isValidProperty(incoming(), request.auth.uid) 
+        // Case 1: Promoted property update by owner or agent
+        (isPromoted(existing()) && (
+          existing().get('ownerId', '') == request.auth.uid ||
+          getUserData().role == 'Agent'
+        )) ||
+        // Case 2: Owner total update for listing request
+        (isOwner(existing().get('ownerId', '')) && isValidProperty(incoming(), request.auth.uid) 
          && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'price', 'type', 'estateName', 'location', 'image', 'status', 'description', 'commission', 'acceptsDownPayment', 'documents', 'googlePinLink', 'metrics', 'trustScore', 'assignedAgentId', 'assignedAgentTier', 'listingRequirements', 'agentBids', 'lastUpdated'])) ||
-        // Case 2: Agent place bid
+        // Case 3: Agent place bid on listing request
         (getUserData().role == 'Agent' && existing().status == 'Agent Bidding' 
          && incoming().diff(existing()).affectedKeys().hasOnly(['agentBids', 'lastUpdated']) 
-         && isValidProperty(incoming(), existing().ownerId))
+         && isValidProperty(incoming(), existing().get('ownerId', '')))
       );
-      allow delete: if isSignedIn() && isOwner(existing().ownerId);
+
+      allow delete: if isSignedIn() && isOwner(existing().get('ownerId', ''));
     }
   }
 }

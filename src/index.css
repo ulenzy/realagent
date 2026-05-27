@@ -36,15 +36,15 @@
 }
 
 .brutalist-input {
-  @apply w-full bg-white dark:bg-zinc-900 border-2 border-brand-black dark:border-zinc-700 p-3 h-12 font-medium focus:outline-none focus:ring-2 focus:ring-brand-teal focus:border-brand-teal transition-all text-sm;
+  @apply w-full bg-white dark:bg-zinc-900 border-2 border-brand-black dark:border-zinc-700 p-3 h-12 font-medium focus:outline-none focus:ring-2 focus:ring-brand-teal focus:border-brand-teal transition-all text-sm text-[#000000] dark:text-[#000000];
 }
 
 .brutalist-input-large {
-  @apply w-full bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 p-4 h-14 font-black uppercase text-xs tracking-widest focus:outline-none focus:bg-brand-teal/5 focus:border-brand-teal transition-all;
+  @apply w-full bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 p-4 h-14 font-black uppercase text-xs tracking-widest focus:outline-none focus:bg-brand-teal/5 focus:border-brand-teal transition-all text-[#000000] dark:text-[#000000];
 }
 
 .brutalist-input-small {
-  @apply w-full bg-white dark:bg-zinc-900 border-2 border-brand-black dark:border-zinc-700 p-2 h-10 font-bold text-xs focus:outline-none focus:border-brand-teal transition-all;
+  @apply w-full bg-white dark:bg-zinc-900 border-2 border-brand-black dark:border-zinc-700 p-2 h-10 font-bold text-xs focus:outline-none focus:border-brand-teal transition-all text-[#000000] dark:text-[#000000];
 }
 
 .brutalist-button {

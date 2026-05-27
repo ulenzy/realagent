@@ -21,6 +21,7 @@ export interface Agent {
   linkedin?: string;
   onlineHours?: string;
   specializationArea?: string;
+  agentTier?: AgentTier;
 }
 
 export interface EstateIntelligence {
@@ -94,6 +95,7 @@ export interface Property {
   rentalYieldEstimate: number;
   commission?: number; // percentage
   acceptsDownPayment?: boolean;
+  listingRequirements?: ListingRequirements;
 }
 
 export type ListingStatus = 'Pending' | 'Agent Bidding' | 'Inspection Scheduled' | 'Under Review' | 'Approved' | 'Rejected' | 'Archived';
@@ -225,4 +227,5 @@ export interface User {
     lastSubscriptionDate?: string;
   };
   onboardingCompleted?: boolean;
+  welcomeToastShown?: boolean;
 }

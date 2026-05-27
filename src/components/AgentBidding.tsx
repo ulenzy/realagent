@@ -28,7 +28,7 @@ import { cn, formatCurrency, formatNumber } from '../lib/utils';
 import { ListingRequest, AgentBid, AgentTier } from '../types';
 
 export default function AgentBidding() {
-  const { user, listingRequests, updateListingRequest } = useAuth();
+  const { user, listingRequests, platformListings = [], updateListingRequest } = useAuth();
   const { setActiveTab } = useNavigation();
   
   // States for expanding views inline
@@ -40,8 +40,8 @@ export default function AgentBidding() {
   const [biddingSuccessId, setBiddingSuccessId] = useState<string | null>(null);
   const [isSubmittingBid, setIsSubmittingBid] = useState(false);
 
-  // Filter listings based on "Agent Bidding" status
-  const biddingListings = listingRequests.filter(req => req.status === 'Agent Bidding');
+  // Filter listings based on "Agent Bidding" status using platformListings
+  const biddingListings = platformListings;
 
   // Relative time helper
   const getRelativeTime = (timeStr: string) => {
@@ -71,9 +71,9 @@ export default function AgentBidding() {
     const isPending = user.agentVerificationStatus === 'Pending';
     const isVerified = user.agentVerificationStatus === 'Verified';
 
-    // Find agent's active bids across all listings
+    // Find agent's active bids across all platform listings
     const myActiveBids: { listing: ListingRequest; bid: AgentBid }[] = [];
-    listingRequests.forEach(req => {
+    platformListings.forEach(req => {
       if (req.agentBids) {
         const myBid = req.agentBids.find(b => b.agentId === user.id);
         if (myBid) {
@@ -93,7 +93,7 @@ export default function AgentBidding() {
       if (user.kycStatus !== 'Verified') return;
 
       setIsSubmittingBid(true);
-      const targetListing = listingRequests.find(r => r.id === reqId);
+      const targetListing = platformListings.find(r => r.id === reqId);
       if (!targetListing) return;
 
       // Stable mock proximity based on ID length & characters
@@ -160,7 +160,7 @@ export default function AgentBidding() {
                 ) : (
                   <span className="bg-emerald-100 text-emerald-800 border-2 border-emerald-600 px-3 py-1 text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
                     <CheckCircle2 size={14} />
-                    Tier 1 Verified Verified
+                    Tier 1 Confirmed
                   </span>
                 )}
               </div>
@@ -185,7 +185,7 @@ export default function AgentBidding() {
               </div>
               <div className="shrink-0">
                 <button
-                  onClick={() => setActiveTab('myspace')}
+                  onClick={() => setActiveTab('profile')}
                   className="bg-brand-black text-brand-teal hover:bg-zinc-800 text-xs font-black uppercase tracking-widest px-4 py-2 border-2 border-brand-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all"
                 >
                   Add Reg Number → Upgrade

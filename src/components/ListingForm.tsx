@@ -1,13 +1,91 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Building2, MapPin, FileText, User, ArrowLeft, ArrowRight, CheckCircle2, Home, Landmark, Trees, Factory, Banknote, Map, Hash, Info, Phone, Mail, UserCircle, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { cn, formatNumberString, parseFormattedNumber, formatNumber } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
+import { MapContainer, TileLayer, useMapEvents } from 'react-leaflet';
+import L from 'leaflet';
 import { NIGERIAN_STATES, STATE_LGAS } from '../constants/locations';
 import { ListingRequest } from '../types';
+
+function MapEventsComponent({ 
+  onMoveStart, 
+  onMoveEnd, 
+  mapRef 
+}: { 
+  onMoveStart: () => void; 
+  onMoveEnd: (map: any) => void; 
+  mapRef: React.MutableRefObject<any>;
+}) {
+  const map = useMapEvents({
+    movestart() {
+      onMoveStart();
+    },
+    moveend() {
+      onMoveEnd(map);
+    }
+  });
+
+  useEffect(() => {
+    mapRef.current = map;
+  }, [map, mapRef]);
+
+  return null;
+}
 
 const PLATFORM_COMMISSION_RATE = 5; // 5% fixed — non-negotiable
 
 type PropertyType = 'House' | 'Apartment' | 'Commercial' | 'Land' | 'Industrial';
+
+const initialFormData = {
+  propertyType: '' as PropertyType | '',
+  title: '',
+  description: '',
+  price: '',
+  state: '',
+  lga: '',
+  area: '',
+  address: '',
+  estateName: '',
+  flatNumber: '',
+  // Type specific
+  bedrooms: '',
+  bathrooms: '',
+  landSize: '',
+  zoningType: '',
+  floorNumber: '',
+  condition: '' as 'New' | 'Renovated' | 'Fair' | 'Needs Work' | '',
+  listingPurpose: '' as 'Sale' | 'Rent' | 'Joint Venture' | '',
+  openToJV: false,
+  jvSharingFormula: '',
+  jvPremium: '',
+  // Legal & Contact
+  documents: [] as string[],
+  documentFiles: {} as Record<string, { fileType: string; fileName: string }>,
+  contactName: '',
+  contactPhone: '',
+  contactEmail: '',
+  isAgent: false,
+  isSubscriber: false,
+  isBoosted: false,
+  acceptsDownPayment: false,
+  furnishing: '' as 'Unfurnished' | 'Semi-furnished' | 'Fully-furnished' | '',
+  extraDays: 0,
+  yearBuilt: '',
+  parkingSpaces: '',
+  googlePinLink: '',
+  amenities: [] as string[],
+  titleCompany: '',
+  legalEncumbrances: '',
+  nin: '',
+  faceVerification: '',
+  listingRequirements: {
+    titleDocumentFileName: '',
+    titleDocumentFileType: '',
+    physicalConditionDescription: '',
+    photos: [] as string[],
+    locationPin: ''
+  }
+};
 
 import { useAuth } from '../context/AuthContext';
 import { useNavigation } from '../context/NavigationContext';
@@ -22,62 +100,103 @@ export default function ListingForm() {
 
   const [customAmenity, setCustomAmenity] = useState('');
 
-  const [formData, setFormData] = useState({
-    propertyType: '' as PropertyType | '',
-    title: '',
-    description: '',
-    price: '',
-    state: '',
-    lga: '',
-    area: '',
-    address: '',
-    estateName: '',
-    flatNumber: '',
-    // Type specific
-    bedrooms: '',
-    bathrooms: '',
-    landSize: '',
-    zoningType: '',
-    floorNumber: '',
-    condition: '' as 'New' | 'Renovated' | 'Fair' | 'Needs Work' | '',
-    listingPurpose: '' as 'Sale' | 'Rent' | 'Joint Venture' | '',
-    openToJV: false,
-    jvSharingFormula: '',
-    jvPremium: '',
-    // Legal & Contact
-    documents: [] as string[],
-    documentFiles: {} as Record<string, { fileType: string; fileName: string }>,
-    contactName: '',
-    contactPhone: '',
-    contactEmail: '',
-    isAgent: false,
-    isSubscriber: false,
-    isBoosted: false,
-    acceptsDownPayment: false,
-    furnishing: '' as 'Unfurnished' | 'Semi-furnished' | 'Fully-furnished' | '',
-    extraDays: 0,
-    yearBuilt: '',
-    parkingSpaces: '',
-    googlePinLink: '',
-    amenities: [] as string[],
-    titleCompany: '',
-    legalEncumbrances: '',
-    nin: '',
-    faceVerification: '',
-    listingRequirements: {
-      titleDocumentFileName: '',
-      titleDocumentFileType: '',
-      physicalConditionDescription: '',
-      photos: [] as string[],
-      locationPin: ''
+  const [formData, setFormData] = useState(initialFormData);
+  const [showDraftBanner, setShowDraftBanner] = useState(false);
+  const isLoaded = useRef(false);
+
+  useEffect(() => {
+    const saved = localStorage.getItem('realagents_listing_draft');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed) {
+          setFormData(parsed);
+          setShowDraftBanner(true);
+        }
+      } catch (e) {
+        console.error("Failed to parse saved listing draft", e);
+      }
     }
-  });
+    isLoaded.current = true;
+  }, []);
+
+  useEffect(() => {
+    if (!isLoaded.current) return;
+    localStorage.setItem('realagents_listing_draft', JSON.stringify(formData));
+  }, [formData]);
+
+  const handleClearDraft = () => {
+    localStorage.removeItem('realagents_listing_draft');
+    setFormData(initialFormData);
+    setShowDraftBanner(false);
+    setStep(1);
+  };
 
   const [requirementsMet, setRequirementsMet] = useState(false);
 
+  const [locationTab, setLocationTab] = useState<'PIN' | 'LINK'>(() => {
+    return formData.listingRequirements.locationPin.startsWith('pin:') ? 'PIN' : 'LINK';
+  });
+  const [isMapModalOpen, setIsMapModalOpen] = useState(false);
+  const [tempLocation, setTempLocation] = useState<{ lat: number; lng: number }>({ lat: 9.0765, lng: 7.3986 });
+  const [resolvedAddress, setResolvedAddress] = useState<string>('');
+  const [isLoadingAddress, setIsLoadingAddress] = useState(false);
+  const [isMapMoving, setIsMapMoving] = useState(false);
+  const mapRef = useRef<any>(null);
+
+  const fetchAddress = async (lat: number, lng: number) => {
+    setIsLoadingAddress(true);
+    try {
+      const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`, {
+        headers: {
+          'Accept-Language': 'en'
+        }
+      });
+      if (!response.ok) throw new Error('Geocoding failed');
+      const data = await response.json();
+      const resolved = data.display_name || `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+      setResolvedAddress(resolved);
+    } catch (error) {
+      console.error('Reverse geocode error:', error);
+      setResolvedAddress(`${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+    } finally {
+      setIsLoadingAddress(false);
+    }
+  };
+
+  const handleMoveEnd = (mapInstance: any) => {
+    setIsMapMoving(false);
+    if (mapInstance) {
+      const center = mapInstance.getCenter();
+      const lat = center.lat;
+      const lng = center.lng;
+      setTempLocation({ lat, lng });
+      fetchAddress(lat, lng);
+    }
+  };
+
+  const handleUseMyLocation = () => {
+    if (navigator.geolocation && mapRef.current) {
+      navigator.geolocation.getCurrentPosition((position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        mapRef.current.flyTo([lat, lng], 16);
+      }, (error) => {
+        console.error("Error geolocating:", error);
+        alert("Unable to retrieve location. Please check browser permissions.");
+      });
+    } else {
+      alert("Geolocation is not supported by your browser.");
+    }
+  };
+
   useEffect(() => {
     const reqs = formData.listingRequirements;
-    const isValidMaps = reqs.locationPin.startsWith('https://maps.google') || reqs.locationPin.startsWith('https://goo.gl');
+    const pinVal = reqs.locationPin || '';
+    const isValidMaps = pinVal.startsWith('pin:') || 
+                        pinVal.includes('maps.google') || 
+                        pinVal.includes('goo.gl') || 
+                        pinVal.includes('maps.app.goo.gl');
     const met = !!(
       reqs.titleDocumentFileName &&
       reqs.photos.length >= 3 &&
@@ -219,6 +338,7 @@ export default function ListingForm() {
     setTimeout(() => {
       setIsSubmitting(false);
       setIsSuccess(true);
+      localStorage.removeItem('realagents_listing_draft');
       
       let generatedTitle = formData.title;
       if (!generatedTitle) {
@@ -359,6 +479,23 @@ export default function ListingForm() {
 
   return (
     <div className="max-w-xl mx-auto py-8 px-4">
+      {showDraftBanner && (
+        <div id="listing-draft-banner" className="mb-6 p-4 bg-amber-400 text-black border-4 border-brand-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <Info size={16} />
+            <span className="text-xs font-black uppercase tracking-wide">
+              Draft restored — you left this form unfinished.
+            </span>
+          </div>
+          <button
+            onClick={handleClearDraft}
+            className="bg-brand-black text-white px-3 py-1.5 text-[10px] font-black uppercase border-2 border-brand-black hover:bg-zinc-800 transition-all shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:shadow-none translate-y-0 hover:translate-y-0.5"
+          >
+            Clear Draft
+          </button>
+        </div>
+      )}
+
       {/* Information Value Score (Trust Score) */}
       <div className="mb-8 p-4 bg-brand-black text-white shadow-brutal-sm border-2 border-brand-teal">
         <div className="flex justify-between items-end mb-2">
@@ -1053,8 +1190,13 @@ export default function ListingForm() {
                     met: formData.listingRequirements.photos.length >= 3
                   },
                   {
-                    text: "Location Pin — valid Google Maps link",
-                    met: !!(formData.listingRequirements.locationPin && (formData.listingRequirements.locationPin.startsWith('https://maps.google') || formData.listingRequirements.locationPin.startsWith('https://goo.gl')))
+                    text: "Location Pin — valid link or Pinned Location",
+                    met: !!(formData.listingRequirements.locationPin && (
+                      formData.listingRequirements.locationPin.startsWith('pin:') ||
+                      formData.listingRequirements.locationPin.includes('maps.google') ||
+                      formData.listingRequirements.locationPin.includes('goo.gl') ||
+                      formData.listingRequirements.locationPin.includes('maps.app.goo.gl')
+                    ))
                   }
                 ].map((item, idx) => (
                   <li key={idx} className="flex items-center gap-2 text-xs">
@@ -1207,39 +1349,257 @@ export default function ListingForm() {
               )}
             </div>
 
-            {/* Section 4 — Location Pin */}
-            <div className="brutalist-card-flat p-4 bg-zinc-50 dark:bg-zinc-900/50 space-y-2">
+            {/* Section 4 — Location Pin with Two-Option Tab Picker */}
+            <div className="brutalist-card-flat p-4 bg-zinc-50 dark:bg-zinc-900/50 space-y-3">
               <label className="block">
                 <span className="block text-xs font-black uppercase text-zinc-900 dark:text-zinc-100 tracking-wider">
-                  Google Maps Location Pin <span className="text-red-500">*</span>
+                  Property Location <span className="text-red-500">*</span>
+                </span>
+                <span className="block text-[10px] uppercase text-zinc-500 font-bold leading-tight mt-0.5">
+                  Pin your exact coordinates on the map or paste a search link to verify
                 </span>
               </label>
-              <input 
-                type="text" 
-                value={formData.listingRequirements.locationPin} 
-                onChange={(e) => setFormData(prev => ({
-                  ...prev,
-                  listingRequirements: {
-                    ...prev.listingRequirements,
-                    locationPin: e.target.value
-                  }
-                }))}
-                placeholder="https://maps.google.com/..."
-                className="w-full brutalist-input-large text-xs"
-              />
-              
-              <p className="text-[10px] font-black uppercase text-zinc-400 tracking-wider leading-normal">
-                Open Google Maps, find your property, tap Share → Copy Link, paste here
-              </p>
-              
-              {formData.listingRequirements.locationPin && 
-               !formData.listingRequirements.locationPin.startsWith('https://maps.google') && 
-               !formData.listingRequirements.locationPin.startsWith('https://goo.gl') && (
-                <p className="text-[10px] font-black uppercase text-red-500 bg-red-50 dark:bg-red-950/25 p-2 border-l-4 border-red-500">
-                  Inline error: Must start with https://maps.google or https://goo.gl
-                </p>
+
+              {/* Tabs */}
+              <div className="flex border-4 border-brand-black bg-brand-black p-1">
+                <button
+                  type="button"
+                  onClick={() => setLocationTab('PIN')}
+                  className={cn(
+                    "flex-1 py-2 text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer",
+                    locationTab === 'PIN' 
+                      ? "bg-brand-teal text-brand-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]" 
+                      : "text-white hover:text-brand-teal"
+                  )}
+                >
+                  PIN ON MAP
+                  {formData.listingRequirements.locationPin.startsWith('pin:') && (
+                    <span className="ml-1 sm:ml-2 bg-emerald-500 text-black text-[8px] px-1.5 py-0.5 font-bold uppercase whitespace-nowrap">
+                      Location Pinned ✓
+                    </span>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLocationTab('LINK')}
+                  className={cn(
+                    "flex-1 py-2 text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer",
+                    locationTab === 'LINK' 
+                      ? "bg-brand-teal text-brand-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]" 
+                      : "text-white hover:text-brand-teal"
+                  )}
+                >
+                  PASTE LINK
+                  {formData.listingRequirements.locationPin && !formData.listingRequirements.locationPin.startsWith('pin:') && (
+                    <span className="ml-1 sm:ml-2 bg-emerald-500 text-black text-[8px] px-1.5 py-0.5 font-bold uppercase whitespace-nowrap">
+                      Linked ✓
+                    </span>
+                  )}
+                </button>
+              </div>
+
+              {/* Tab Contents */}
+              {locationTab === 'LINK' ? (
+                <div className="space-y-2">
+                  <input 
+                    type="text" 
+                    value={formData.listingRequirements.locationPin.startsWith('pin:') ? '' : formData.listingRequirements.locationPin} 
+                    onChange={(e) => setFormData(prev => ({
+                      ...prev,
+                      listingRequirements: {
+                        ...prev.listingRequirements,
+                        locationPin: e.target.value
+                      }
+                    }))}
+                    placeholder="https://maps.google.com/... or https://goo.gl/..."
+                    className="w-full brutalist-input-large text-xs"
+                  />
+                  
+                  <p className="text-[10px] font-black uppercase text-zinc-500 tracking-wider leading-normal">
+                    Open Google Maps, find your property, tap Share → Copy Link, paste here
+                  </p>
+                  
+                  {formData.listingRequirements.locationPin && 
+                   !formData.listingRequirements.locationPin.startsWith('pin:') &&
+                   !formData.listingRequirements.locationPin.includes('maps.google') && 
+                   !formData.listingRequirements.locationPin.includes('goo.gl') && 
+                   !formData.listingRequirements.locationPin.includes('maps.app.goo.gl') && (
+                    <p className="text-[10px] font-black uppercase text-red-500 bg-red-50 dark:bg-red-950/25 p-2 border-l-4 border-red-500">
+                      Inline error: Must match valid Maps URL prefix (maps.google, goo.gl, maps.app.goo.gl)
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="p-4 bg-white dark:bg-zinc-800 border-2 border-brand-black flex flex-col items-center gap-3 select-none">
+                    {formData.listingRequirements.locationPin.startsWith('pin:') ? (
+                      <div className="text-center font-bold">
+                        <span className="text-emerald-500 block text-[10px] uppercase tracking-widest font-black">MAP LOCATION SECURED ✓</span>
+                        <span className="text-[9px] font-mono block opacity-60 mt-1 uppercase text-zinc-600 dark:text-zinc-300">
+                          COORD: {formData.listingRequirements.locationPin.substring(4)}
+                        </span>
+                      </div>
+                    ) : (
+                      <p className="text-[10px] text-zinc-400 font-bold uppercase text-center max-w-md">
+                        No coordinates secured yet. Launch map layer to pin correct geolocation.
+                      </p>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsMapModalOpen(true);
+                        const existingPin = formData.listingRequirements.locationPin;
+                        if (existingPin.startsWith('pin:')) {
+                          const [latS, lngS] = existingPin.substring(4).split(',');
+                          const lat = parseFloat(latS);
+                          const lng = parseFloat(lngS);
+                          if (!isNaN(lat) && !isNaN(lng)) {
+                            setTempLocation({ lat, lng });
+                            fetchAddress(lat, lng);
+                            return;
+                          }
+                        }
+                        setTempLocation({ lat: 9.0765, lng: 7.3986 });
+                        fetchAddress(9.0765, 7.3986);
+                      }}
+                      className="bg-brand-black text-white hover:bg-zinc-800 font-display font-black uppercase text-xs px-6 py-2.5 border-2 border-brand-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:translate-x-0.5 hover:translate-y-0.5 transition-all cursor-pointer"
+                    >
+                      Open Map
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
+
+            {/* Interactive Map Modal Overlay */}
+            <AnimatePresence>
+              {isMapModalOpen && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-[9999] bg-brand-black/80 flex items-center justify-center p-4 backdrop-blur-xs"
+                >
+                  <motion.div
+                    initial={{ scale: 0.95, y: 20 }}
+                    animate={{ scale: 1, y: 0 }}
+                    exit={{ scale: 0.95, y: 20 }}
+                    transition={{ type: 'spring', duration: 0.4 }}
+                    className="w-full max-w-3xl h-[85vh] bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 shadow-aggressive flex flex-col relative"
+                  >
+                    
+                    {/* Modal Header */}
+                    <div className="p-4 border-b-4 border-brand-black bg-brand-black text-white flex justify-between items-center shrink-0">
+                      <h3 className="text-xs font-display font-black uppercase tracking-wider text-brand-teal">Interactive Location Pin</h3>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleUseMyLocation}
+                          className="bg-brand-teal text-brand-black hover:brightness-110 px-3 py-1.5 text-[9px] font-black uppercase flex items-center gap-1 border-2 border-brand-black shadow-[2px_2px_0px_0px_rgba(255,255,255,1)] cursor-pointer"
+                        >
+                          <MapPin size={10} /> Use My Location
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsMapModalOpen(false)}
+                          className="text-white hover:text-red-500 font-extrabold text-xs px-2 py-1 cursor-pointer"
+                        >
+                          ✕ CLOSE
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Map Area */}
+                    <div className="flex-1 relative bg-zinc-100 overflow-hidden z-0">
+                      <MapContainer
+                        center={[tempLocation.lat, tempLocation.lng]}
+                        zoom={14}
+                        zoomControl={true}
+                        className="w-full h-full"
+                      >
+                        <TileLayer
+                          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                        />
+                        <MapEventsComponent 
+                          onMoveStart={() => setIsMapMoving(true)}
+                          onMoveEnd={handleMoveEnd} 
+                          mapRef={mapRef} 
+                        />
+                      </MapContainer>
+
+                      {/* Pin Component Centered with pure CSS & custom animations */}
+                      <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-[1000]">
+                        <div className="relative">
+                          {/* Centered pin emoji */}
+                          <motion.div
+                            animate={{
+                              y: isMapMoving ? -10 : 0,
+                            }}
+                            transition={{ type: 'spring', stiffness: 350, damping: 20 }}
+                            className="text-4xl filter drop-shadow-[0_4px_6px_rgba(0,0,0,0.3)] select-none"
+                            style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -100%)' }}
+                          >
+                            📍
+                          </motion.div>
+                          
+                          {/* Pin drop shadow beneath pin to simulate movement */}
+                          <motion.div
+                            animate={{
+                              scale: isMapMoving ? 0.6 : 1,
+                              opacity: isMapMoving ? 0.35 : 0.8,
+                            }}
+                            transition={{ type: 'spring', stiffness: 350, damping: 20 }}
+                            className="w-4 h-1.5 bg-black/40 rounded-full blur-[2px] absolute left-0 bottom-0 -translate-x-1/2 pointer-events-none"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Modal Bottom control panel */}
+                    <div className="p-4 border-t-4 border-brand-black bg-zinc-50 dark:bg-zinc-900 flex flex-col gap-3 justify-between shrink-0">
+                      <div className={cn(
+                        "bg-white dark:bg-zinc-800 border-2 border-brand-black p-3 transition-all",
+                        isLoadingAddress && "animate-pulse border-brand-teal"
+                      )}>
+                        <span className="block text-[8px] font-black uppercase text-zinc-400 mb-0.5">RESOLVED ADDRESS</span>
+                        <p className="text-[10px] sm:text-xs font-bold leading-tight uppercase text-zinc-900 dark:text-zinc-100">
+                          {isLoadingAddress ? "Resolving coordinates..." : (resolvedAddress || "Drag map to select location")}
+                        </p>
+                        <span className="block text-[8px] font-mono opacity-50 mt-1 uppercase text-zinc-500">
+                          COORDINATES: {tempLocation.lat.toFixed(6)}, {tempLocation.lng.toFixed(6)}
+                        </span>
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={isLoadingAddress}
+                        onClick={() => {
+                          const pinStr = `pin:${tempLocation.lat},${tempLocation.lng}`;
+                          setFormData(prev => ({
+                            ...prev,
+                            listingRequirements: {
+                              ...prev.listingRequirements,
+                              locationPin: pinStr
+                            }
+                          }));
+                          setIsMapModalOpen(false);
+                        }}
+                        className={cn(
+                          "w-full py-3 font-display font-black text-xs uppercase tracking-widest transition-all text-center border-2 border-brand-black shadow-brutal-sm cursor-pointer",
+                          isLoadingAddress 
+                            ? "bg-zinc-200 text-zinc-400 cursor-not-allowed" 
+                            : "bg-brand-teal text-brand-black hover:brightness-110 active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
+                        )}
+                      >
+                        CONFIRM THIS LOCATION
+                      </button>
+                    </div>
+
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* Step Navigation Controls - Gated Next Button */}
             <div className="flex gap-4 mt-8 pt-4 border-t-2 border-brand-black/5">

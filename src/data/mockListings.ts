@@ -1,4 +1,4 @@
-import { Property, Agent } from '../types';
+import { Property, Agent, AgentTier } from '../types';
 export const agents: Record<string, Agent> = {
   musa: {
     id: 'a1',
@@ -14,7 +14,8 @@ export const agents: Record<string, Agent> = {
     bio: 'Specialist in high-yield land investments and estate banking in the Ibeju-Lekki and Eko Atlantic corridors.',
     linkedin: 'https://linkedin.com/in/agentmusa',
     onlineHours: '09:00 - 18:00',
-    specializationArea: 'Lagos Island, Ibeju-Lekki'
+    specializationArea: 'Lagos Island, Ibeju-Lekki',
+    agentTier: 'Verified Professional' as AgentTier
   },
   sarah: {
     id: 'a2',
@@ -30,7 +31,8 @@ export const agents: Record<string, Agent> = {
     bio: 'Dedicated to finding the most exclusive residential masterpieces in Abuja and Lagos for high-net-worth clients.',
     linkedin: 'https://linkedin.com/in/agentsarah',
     onlineHours: '08:00 - 20:00',
-    specializationArea: 'Maitama, Asokoro, Ikoyi'
+    specializationArea: 'Maitama, Asokoro, Ikoyi',
+    agentTier: 'Verified Professional' as AgentTier
   },
   bello: {
     id: 'a3',
@@ -46,7 +48,8 @@ export const agents: Record<string, Agent> = {
     bio: 'Expert in the Abuja property market, specializing in diplomatic zones and the expanding Jahi-Katampe axis.',
     linkedin: 'https://linkedin.com/in/agentbello',
     onlineHours: '09:00 - 17:00',
-    specializationArea: 'Jahi, Katampe, Wuse'
+    specializationArea: 'Jahi, Katampe, Wuse',
+    agentTier: 'Verified Professional' as AgentTier
   },
   chioma: {
     id: 'a4',
@@ -62,7 +65,8 @@ export const agents: Record<string, Agent> = {
     bio: 'Passionate about the Lagos Island luxury scene, focusing on Ikoyi, Victoria Island, and Lekki Phase 1.',
     linkedin: 'https://linkedin.com/in/agentchioma',
     onlineHours: '10:00 - 19:00',
-    specializationArea: 'Ikoyi, VI, Lekki Phase 1'
+    specializationArea: 'Ikoyi, VI, Lekki Phase 1',
+    agentTier: 'Verified Professional' as AgentTier
   },
   tunde: {
     id: 'a5',
@@ -73,7 +77,8 @@ export const agents: Record<string, Agent> = {
     specialization: 'Commercial & New Lagos',
     responseTime: '< 1 hour',
     propertiesSold: 64,
-    bio: 'Strategic consultant for commercial real estate and emerging markets in Ikeja GRA and New Lagos.'
+    bio: 'Strategic consultant for commercial real estate and emerging markets in Ikeja GRA and New Lagos.',
+    agentTier: 'Verified Professional' as AgentTier
   },
   obi: {
     id: 'a6',
@@ -84,7 +89,8 @@ export const agents: Record<string, Agent> = {
     specialization: 'Port Harcourt Luxury',
     responseTime: '< 15 mins',
     propertiesSold: 76,
-    bio: 'Premium agent for the Port Harcourt luxury market, focusing on Old GRA and security-gated estates.'
+    bio: 'Premium agent for the Port Harcourt luxury market, focusing on Old GRA and security-gated estates.',
+    agentTier: 'Verified Professional' as AgentTier
   },
   fatima: {
     id: 'a7',
@@ -95,7 +101,8 @@ export const agents: Record<string, Agent> = {
     specialization: 'Kano Commercial',
     responseTime: '< 30 mins',
     propertiesSold: 124,
-    bio: 'Leading commercial property expert in Kano, with deep roots in the city agricultural and retail trade zones.'
+    bio: 'Leading commercial property expert in Kano, with deep roots in the city agricultural and retail trade zones.',
+    agentTier: 'Verified Professional' as AgentTier
   }
 };
 
@@ -166,7 +173,14 @@ export const mockProperties: Property[] = [
     appreciationScore: 92,
     rentalYieldEstimate: 7.5,
     commission: 1.5,
-    acceptsDownPayment: true
+    acceptsDownPayment: true,
+    listingRequirements: {
+      titleDocumentFileName: 'title-deed.pdf',
+      titleDocumentFileType: 'application/pdf',
+      physicalConditionDescription: 'This premium property is in absolutely excellent, pristine structural condition with no cracks or leaks. Solid concrete columns, premium grade plumbing systems, high-quality wire installations, and well-maintained brick walls.',
+      photos: ['photo1.jpg', 'photo2.jpg', 'photo3.jpg'],
+      locationPin: 'https://maps.google.com/?q=9.0123,7.5021'
+    }
   },
   {
     id: 'lento-2',
@@ -225,7 +239,14 @@ export const mockProperties: Property[] = [
     keyHighlights: ['Corner Piece', '100% Build-ready', 'Registered Title', 'Secure Environment'],
     appreciationScore: 95,
     rentalYieldEstimate: 0,
-    commission: 2.5
+    commission: 2.5,
+    listingRequirements: {
+      titleDocumentFileName: 'title-deed.pdf',
+      titleDocumentFileType: 'application/pdf',
+      physicalConditionDescription: 'This premium property is in absolutely excellent, pristine structural condition with no cracks or leaks. Solid concrete columns, premium grade plumbing systems, high-quality wire installations, and well-maintained brick walls.',
+      photos: ['photo1.jpg', 'photo2.jpg', 'photo3.jpg'],
+      locationPin: 'https://maps.google.com/?q=9.0125,7.5025'
+    }
   },
   {
     id: 'lento-3',
@@ -285,7 +306,14 @@ export const mockProperties: Property[] = [
     keyHighlights: ['Serviced Apartment', 'City Views', 'Modern Intercom', 'Central Air Conditioning'],
     appreciationScore: 80,
     rentalYieldEstimate: 9.0,
-    commission: 10
+    commission: 10,
+    listingRequirements: {
+      titleDocumentFileName: 'title-deed.pdf',
+      titleDocumentFileType: 'application/pdf',
+      physicalConditionDescription: 'This premium property is in absolutely excellent, pristine structural condition with no cracks or leaks. Solid concrete columns, premium grade plumbing systems, high-quality wire installations, and well-maintained brick walls.',
+      photos: ['photo1.jpg', 'photo2.jpg', 'photo3.jpg'],
+      locationPin: 'https://maps.google.com/?q=9.0120,7.5018'
+    }
   },
 
   // B&H Estate — Katampe Extension, Abuja
@@ -347,7 +375,14 @@ export const mockProperties: Property[] = [
     appreciationScore: 88,
     rentalYieldEstimate: 6.8,
     commission: 3.5,
-    acceptsDownPayment: true
+    acceptsDownPayment: true,
+    listingRequirements: {
+      titleDocumentFileName: 'title-deed.pdf',
+      titleDocumentFileType: 'application/pdf',
+      physicalConditionDescription: 'This premium property is in absolutely excellent, pristine structural condition with no cracks or leaks. Solid concrete columns, premium grade plumbing systems, high-quality wire installations, and well-maintained brick walls.',
+      photos: ['photo1.jpg', 'photo2.jpg', 'photo3.jpg'],
+      locationPin: 'https://maps.google.com/?q=9.1021,7.4812'
+    }
   },
   {
     id: 'bh-2',
@@ -407,7 +442,14 @@ export const mockProperties: Property[] = [
     keyHighlights: ['Massive Land Size', 'Skyline Views', 'Ultra-Luxury Finishing', 'Chef\'s Kitchen'],
     appreciationScore: 90,
     rentalYieldEstimate: 5.5,
-    commission: 2.0
+    commission: 2.0,
+    listingRequirements: {
+      titleDocumentFileName: 'title-deed.pdf',
+      titleDocumentFileType: 'application/pdf',
+      physicalConditionDescription: 'This premium property is in absolutely excellent, pristine structural condition with no cracks or leaks. Solid concrete columns, premium grade plumbing systems, high-quality wire installations, and well-maintained brick walls.',
+      photos: ['photo1.jpg', 'photo2.jpg', 'photo3.jpg'],
+      locationPin: 'https://maps.google.com/?q=9.1025,7.4815'
+    }
   },
   {
     id: 'bh-3',

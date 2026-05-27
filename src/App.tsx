@@ -10,10 +10,12 @@
 
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Home, Search, FileText, Zap, MessageCircle, Moon, Sun, Gavel, Heart, Store, Sparkles, LayoutDashboard, Plus } from 'lucide-react';
+import { Home, Search, FileText, Zap, MessageCircle, Moon, Sun, Gavel, Heart, Store, Sparkles, LayoutDashboard, Plus, ShieldAlert, Info } from 'lucide-react';
 import { cn } from './lib/utils';
 import { mockProperties } from './data/mockListings';
-import { ListingRequest } from './types';
+import { ListingRequest, Property } from './types';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { db } from './lib/firebase';
 import Marketplace from './components/Marketplace';
 import AISearch from './components/AISearch';
 import Profile from './components/Profile';
@@ -55,39 +57,42 @@ export default function App() {
     setIsMessagingOpen 
   } = useUI();
 
+  const [showWelcomeToast, setShowWelcomeToast] = React.useState(false);
+  const toastActionDone = React.useRef(false);
+
+  React.useEffect(() => {
+    if (user && user.onboardingCompleted && user.kycStatus === 'None' && !user.welcomeToastShown && !toastActionDone.current) {
+      setShowWelcomeToast(true);
+      const timer = setTimeout(() => {
+        handleDismissWelcomeToast();
+      }, 6000);
+      return () => clearTimeout(timer);
+    }
+  }, [user?.onboardingCompleted, user?.kycStatus, user?.welcomeToastShown]);
+
+  const handleDismissWelcomeToast = React.useCallback(() => {
+    if (toastActionDone.current) return;
+    toastActionDone.current = true;
+    setShowWelcomeToast(false);
+    updateUser({ welcomeToastShown: true });
+  }, [updateUser]);
+
+  const handleActionClick = () => {
+    if (user?.role === 'Agent' || user?.role === 'Seller') {
+      setActiveTab('profile');
+    }
+    handleDismissWelcomeToast();
+  };
+
   const handleAddListingRequest = (request: Omit<ListingRequest, 'id' | 'status' | 'submittedAt' | 'lastUpdated'>) => {
     if (!user) return;
     
-    const LISTING_LIMIT_FREE = 2;
-    const LISTING_LIMIT_PRO = 6;
-    const ADDITIONAL_LISTING_COST = 10;
-    
-    const currentLimit = user.isSubscriber ? LISTING_LIMIT_PRO : LISTING_LIMIT_FREE;
-    const isAdditional = listingRequests.length >= currentLimit;
-    
-    if (isAdditional) {
-      if (user.tokens < ADDITIONAL_LISTING_COST) {
-        alert(`Insufficient tokens! Additional listings cost ${ADDITIONAL_LISTING_COST} tokens.`);
-        return;
-      }
-      
-      const newTransaction = {
-        id: `tx-${Date.now()}`,
-        type: 'Debit' as const,
-        amount: ADDITIONAL_LISTING_COST,
-        description: `Additional Listing Fee: ${request.title}`,
-        timestamp: new Date().toISOString()
-      };
-      
-      addTransaction(newTransaction as any);
-    }
-
     const PLATFORM_COMMISSION_RATE = 5;
     const newRequest: ListingRequest = {
       ...request,
       commission: PLATFORM_COMMISSION_RATE,
       id: `req-${Date.now()}`,
-      status: 'Pending',
+      status: 'Agent Bidding',
       submittedAt: new Date().toISOString(),
       lastUpdated: new Date().toISOString(),
       expiresAt: new Date(Date.now() + 30 * 86400000).toISOString(),
@@ -96,7 +101,48 @@ export default function App() {
     addListingRequest(newRequest);
   };
 
-  const selectedProperty = selectedPropertyId ? mockProperties.find(p => p.id === selectedPropertyId) : null;
+  const [selectedLiveProperty, setSelectedLiveProperty] = React.useState<Property | null>(null);
+
+  React.useEffect(() => {
+    if (!selectedPropertyId) {
+      setSelectedLiveProperty(null);
+      return;
+    }
+    const isMock = mockProperties.some(p => p.id === selectedPropertyId);
+    if (isMock) {
+      setSelectedLiveProperty(null);
+      return;
+    }
+    
+    // Check local guest properties
+    const savedBytes = localStorage.getItem('localGuestProperties');
+    if (savedBytes) {
+      const parsed = JSON.parse(savedBytes);
+      const found = parsed.find((p: any) => p.id === selectedPropertyId);
+      if (found) {
+        setSelectedLiveProperty(found);
+        return;
+      }
+    }
+
+    // Fetch from Firestore
+    const docRef = doc(db, 'properties', selectedPropertyId);
+    const unsubscribe = onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setSelectedLiveProperty({ id: docSnap.id, ...docSnap.data() } as any);
+      } else {
+        setSelectedLiveProperty(null);
+      }
+    }, (err) => {
+      console.error("Error fetching selected live property: ", err);
+    });
+
+    return () => unsubscribe();
+  }, [selectedPropertyId]);
+
+  const selectedProperty = selectedPropertyId 
+    ? (mockProperties.find(p => p.id === selectedPropertyId) || selectedLiveProperty) 
+    : null;
 
   if (loading) {
     return (
@@ -131,6 +177,43 @@ export default function App() {
 
   return (
     <div className="flex flex-col min-h-screen bg-brand-gray dark:bg-[#1c1c21] selection:bg-brand-teal selection:text-brand-black font-sans transition-colors duration-300">
+      {/* Welcome & KYC Guidance Toast */}
+      <AnimatePresence>
+        {showWelcomeToast && (
+          <motion.div
+            initial={{ y: -120, x: "-50%", opacity: 0 }}
+            animate={{ y: 0, x: "-50%", opacity: 1 }}
+            exit={{ y: -120, x: "-50%", opacity: 0 }}
+            transition={{ type: "spring", stiffness: 350, damping: 25 }}
+            className="fixed top-6 left-1/2 z-[1100] w-full max-w-lg px-4"
+          >
+            <div className="bg-brand-black text-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-300 p-4 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,1)] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="p-2 bg-brand-teal dark:bg-teal-900/30 text-brand-black dark:text-brand-teal border-2 border-brand-black shrink-0 relative rotate-2 max-sm:hidden">
+                  {user.role === 'Buyer' ? <Sparkles size={18} /> : <ShieldAlert size={18} />}
+                </div>
+                <div>
+                  <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-brand-teal leading-none mb-1">
+                    System Intelligence Notice
+                  </h4>
+                  <p className="text-xs font-bold leading-normal text-zinc-200 uppercase">
+                    {user.role === 'Buyer' && "Welcome — browse listings and save your favourites."}
+                    {user.role === 'Seller' && "Welcome — tap + to list your first property. KYC required before submission."}
+                    {user.role === 'Agent' && "Welcome — complete KYC in your Profile to start bidding on listings."}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={handleActionClick}
+                className="bg-brand-teal text-brand-black font-display font-black uppercase text-[10px] tracking-widest px-4 py-2 border-2 border-brand-black shrink-0 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all cursor-pointer self-stretch sm:self-center text-center"
+              >
+                {user.role === 'Buyer' ? "Acknowledge" : "Go to Profile"}
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Header - Global */}
       <header className="aggressive-header">
         <div className="flex items-center gap-3 cursor-pointer" onClick={() => { setActiveTab('marketplace'); handleBackToMarketplace(); }}>
