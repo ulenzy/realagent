@@ -97,9 +97,28 @@ export interface Property {
   acceptsDownPayment?: boolean;
   listingRequirements?: ListingRequirements;
   listingRequestId?: string;
+  verificationFeePaid?: boolean;
 }
 
-export type ListingStatus = 'Pending' | 'Agent Bidding' | 'Inspection Scheduled' | 'Under Review' | 'Approved' | 'Rejected' | 'Archived';
+export interface TokenBundle {
+  id: string;
+  tokens: number;
+  priceNaira: number;
+  label: string;
+  popular?: boolean;
+}
+
+export interface TokenPurchase {
+  bundleId: string;
+  tokens: number;
+  nairaAmount: number;
+  purchasedAt: string;
+  reference: string;
+}
+
+export type ListingFeeStatus = 'Verification Unpaid' | 'Verification Paid' | 'Monthly Unpaid' | 'Monthly Paid' | 'Inactive' | 'Unpaid' | 'Paid' | 'Waived';
+
+export type ListingStatus = 'Pending' | 'Agent Bidding' | 'Inspection Scheduled' | 'Under Review' | 'Approved' | 'Rejected' | 'Archived' | 'Inactive';
 
 export interface ListingRequirements {
   titleDocumentFileName: string;       // filename of uploaded title document
@@ -160,8 +179,19 @@ export interface ListingRequest {
   bathrooms: number;
   estateName: string;
   amenities: string[];
-  listingFeeStatus: 'Unpaid' | 'Paid' | 'Waived';
+  listingFeeStatus: ListingFeeStatus;
   listingFeePaidAt?: string;
+  verificationFeePaid: boolean;
+  verificationFeePaidAt?: string;
+  monthlyFeePaidAt?: string;
+  monthlyFeeExpiresAt?: string;
+  listingFeeStub?: {
+    amount: number;
+    currency: string;
+    provider: string;
+    status: string;
+    reference: string;
+  };
   dealStatus: 'Open' | 'Inspection Paid' | 'Under Offer' | 'Closed' | 'Disputed';
   bidWindowOpensAt?: string;
   bidWindowExpiresAt?: string;
@@ -224,7 +254,7 @@ export interface User {
   totalReviews?: number;
   tokens: number;
   transactions?: Transaction[];
-  role: 'Buyer' | 'Seller' | 'Agent';
+  role: 'Buyer' | 'Seller' | 'Agent' | 'Admin';
   agentTier?: AgentTier;
   agentRegNumber?: string;
   agentVerificationStatus?: 'Unverified' | 'Pending' | 'Verified' | 'Rejected';
@@ -242,4 +272,12 @@ export interface User {
   };
   onboardingCompleted?: boolean;
   welcomeToastShown?: boolean;
+  tokenPurchases?: TokenPurchase[];
+  verifiedPropertySeller?: boolean;
+  accountStatus?: 'Active' | 'Suspended' | 'Banned';
+  suspensionReason?: string;
+  suspendedAt?: string;
+  dealsClosedCount?: number;
+  inspectionsCompletedCount?: number;
+  commissionRate?: number;
 }

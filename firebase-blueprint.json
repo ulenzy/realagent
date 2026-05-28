@@ -75,6 +75,34 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "title", "price"]
+    },
+    "Chat": {
+      "title": "Chat",
+      "description": "A communication channel between flat hunter and agent/seller",
+      "type": "object",
+      "properties": {
+        "participants": { "type": "array" },
+        "propertyId": { "type": "string" },
+        "propertyName": { "type": "string" },
+        "inspectionFeePaid": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "lastMessage": { "type": "string" },
+        "lastTimestamp": { "type": "string" }
+      },
+      "required": ["participants", "propertyName", "propertyId", "inspectionFeePaid", "createdAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "An interactive message inside a chat channel",
+      "type": "object",
+      "properties": {
+        "senderId": { "type": "string" },
+        "receiverId": { "type": "string" },
+        "text": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "blocked": { "type": "boolean" }
+      },
+      "required": ["senderId", "receiverId", "text", "timestamp", "blocked"]
     }
   },
   "firestore": {
@@ -89,6 +117,14 @@
     "properties/{propertyId}": {
       "schema": "Property",
       "description": "Marketplace live property listings"
+    },
+    "chats/{chatId}": {
+      "schema": "Chat",
+      "description": "Active chat threads"
+    },
+    "chats/{chatId}/messages/{messageId}": {
+      "schema": "ChatMessage",
+      "description": "Individual messages inside active chat threads"
     }
   }
 }

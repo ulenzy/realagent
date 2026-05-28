@@ -1,15 +1,18 @@
 import React, { useState } from 'react';
-import { Heart, FileText, Gavel } from 'lucide-react';
+import { Heart, FileText, Gavel, Trophy } from 'lucide-react';
 import WishlistView from './WishlistView';
 import MyListingsView from './MyListingsView';
 import AgentBidding from './AgentBidding';
+import LeaderboardView from './LeaderboardView';
 
 interface MySpaceProps {
-  defaultActiveSubTab: 'Wishlist' | 'My Listings' | 'Bids';
+  defaultActiveSubTab: 'Wishlist' | 'My Listings' | 'Bids' | 'Leaderboard';
 }
 
 export default function MySpace({ defaultActiveSubTab }: MySpaceProps) {
-  const [activeSubTab, setActiveSubTab] = useState<'Wishlist' | 'My Listings' | 'Bids'>(defaultActiveSubTab);
+  const [activeSubTab, setActiveSubTab] = useState<'Wishlist' | 'My Listings' | 'Bids' | 'Leaderboard'>(
+    defaultActiveSubTab === 'Leaderboard' ? 'Leaderboard' : defaultActiveSubTab
+  );
 
   return (
     <div className="flex flex-col min-h-screen bg-brand-gray dark:bg-[#1a1a1e] pb-16">
@@ -53,6 +56,18 @@ export default function MySpace({ defaultActiveSubTab }: MySpaceProps) {
               <Gavel size={16} />
               Bids
             </button>
+            <button
+              id="myspace-tab-leaderboard"
+              onClick={() => setActiveSubTab('Leaderboard')}
+              className={`flex-1 flex items-center justify-center gap-2 py-3 px-3 text-xs font-black uppercase tracking-wide border-2 border-brand-black transition-all ${
+                activeSubTab === 'Leaderboard'
+                  ? 'bg-brand-teal text-brand-black font-extrabold translate-y-0.5 shadow-none'
+                  : 'bg-white dark:bg-zinc-800 text-brand-black dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-700 shadow-brutal-xs'
+              }`}
+            >
+              <Trophy size={16} />
+              Leaderboard
+            </button>
           </div>
         </div>
       </div>
@@ -66,7 +81,10 @@ export default function MySpace({ defaultActiveSubTab }: MySpaceProps) {
           <MyListingsView />
         )}
         {activeSubTab === 'Bids' && (
-          <AgentBidding />
+          <AgentBidding onViewLeaderboard={() => setActiveSubTab('Leaderboard')} />
+        )}
+        {activeSubTab === 'Leaderboard' && (
+          <LeaderboardView onBack={() => setActiveSubTab('Bids')} />
         )}
       </div>
     </div>

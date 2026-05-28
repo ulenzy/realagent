@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
-type ActiveTab = 'marketplace' | 'ai' | 'myspace' | 'profile';
+type ActiveTab = 'marketplace' | 'ai' | 'myspace' | 'profile' | 'admin';
 
 interface NavigationContextType {
   activeTab: ActiveTab;

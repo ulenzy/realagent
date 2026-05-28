@@ -10,7 +10,7 @@
 
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Home, Search, FileText, Zap, MessageCircle, Moon, Sun, Gavel, Heart, Store, Sparkles, LayoutDashboard, Plus, ShieldAlert, Info } from 'lucide-react';
+import { Home, Search, FileText, Zap, MessageCircle, Moon, Sun, Gavel, Heart, Store, Sparkles, LayoutDashboard, Plus, ShieldAlert, Info, Settings } from 'lucide-react';
 import { cn } from './lib/utils';
 import { mockProperties } from './data/mockListings';
 import { ListingRequest, Property } from './types';
@@ -32,6 +32,7 @@ import { useUI } from './context/UIContext';
 import { getUserAvatarUrl } from './lib/avatar';
 import AgentBidding from './components/AgentBidding';
 import MySpace from './components/MySpace';
+import AdminPanel from './components/AdminPanel';
 
 export default function App() {
   const { user, firebaseUser, loading, error, listingRequests, savedProperties, toggleSavedProperty, addListingRequest, updateListingRequest, updateUser, addTransaction, logout } = useAuth();
@@ -88,9 +89,11 @@ export default function App() {
     if (!user) return;
     
     const PLATFORM_COMMISSION_RATE = 5;
+    const LISTING_FEE = 20000;
+    const resolvedCommission = user.commissionRate !== undefined ? user.commissionRate : PLATFORM_COMMISSION_RATE;
     const newRequest: ListingRequest = {
       ...request,
-      commission: PLATFORM_COMMISSION_RATE,
+      commission: resolvedCommission,
       id: (request as any).id || `req-${Date.now()}`,
       status: 'Agent Bidding',
       submittedAt: new Date().toISOString(),
@@ -104,11 +107,18 @@ export default function App() {
       bathrooms: request.bathrooms,
       estateName: request.estateName,
       amenities: request.amenities,
-      listingFeeStatus: request.listingFeeStatus || 'Unpaid',
+      listingFeeStatus: 'Unpaid',
       listingFeePaidAt: request.listingFeePaidAt || '',
-      dealStatus: request.dealStatus || 'Open',
-      bidWindowOpensAt: request.bidWindowOpensAt || '',
-      bidWindowExpiresAt: request.bidWindowExpiresAt || ''
+      dealStatus: 'Open',
+      bidWindowOpensAt: new Date().toISOString(),
+      bidWindowExpiresAt: new Date(Date.now() + 24 * 3600000).toISOString(),
+      listingFeeStub: {
+        amount: LISTING_FEE,
+        currency: 'NGN',
+        provider: 'paystack',
+        status: 'pending',
+        reference: `lf-${Date.now()}`
+      }
     };
     addListingRequest(newRequest);
   };
@@ -185,6 +195,47 @@ export default function App() {
 
   if (!user.onboardingCompleted) {
     return <Onboarding />;
+  }
+
+  if (user.accountStatus === 'Suspended' || user.accountStatus === 'Banned') {
+    const isBanned = user.accountStatus === 'Banned';
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-brand-gray dark:bg-[#0a0a0b] p-6 text-center">
+        <div className="w-full max-w-lg bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-300 p-8 shadow-aggressive relative overflow-hidden">
+          <div className="absolute top-0 left-0 right-0 h-4 bg-brand-red animate-pulse" />
+          
+          <div className="flex flex-col items-center mt-4">
+            <div className="p-4 bg-red-100 dark:bg-red-950/40 text-brand-red border-4 border-brand-black dark:border-zinc-300 mb-6 relative rotate-3 shadow-brutal-xs">
+              <ShieldAlert size={36} className="animate-bounce" />
+            </div>
+            
+            <h1 className="text-2xl font-display font-black italic uppercase tracking-tight text-brand-black dark:text-red-500 mb-4">
+              {isBanned ? "ACCESS PERMANENTLY DENIED" : "ACCOUNT UNDER RESTRICTION"}
+            </h1>
+            
+            <div className="bg-zinc-50 dark:bg-zinc-850 p-5 border-2 border-dashed border-zinc-300 dark:border-zinc-700 font-mono text-xs uppercase text-zinc-650 dark:text-zinc-300 mb-6 leading-relaxed">
+              {isBanned 
+                ? "Your account has been permanently banned for violating RealAgents platform terms."
+                : "Your account has been suspended pending investigation. Check your registered email for details. Contact support@realagents.ng."
+              }
+            </div>
+
+            <p className="text-[10px] font-black uppercase text-zinc-400 tracking-wider mb-2">
+              System Action Log
+            </p>
+            <div className="flex gap-2 items-center justify-center">
+              <span className="text-[9px] font-black uppercase tracking-widest bg-brand-black text-white dark:bg-zinc-800 dark:text-red-400 px-2 py-1 border border-brand-black dark:border-zinc-700 italic">
+                {user.accountStatus}
+              </span>
+              <span className="text-zinc-400">•</span>
+              <span className="text-[9px] font-black font-mono text-zinc-500 uppercase">
+                Graceful exit in progress
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -321,6 +372,7 @@ export default function App() {
                 />
               )}
               {activeTab === 'profile' && <Profile initialView="main" />}
+              {activeTab === 'admin' && <AdminPanel />}
             </motion.div>
           )}
         </AnimatePresence>
@@ -349,7 +401,7 @@ export default function App() {
       {/* Bottom Navigation - Aggressive & High Contrast */}
       {!selectedPropertyId && !isListingFlow && (
         <nav className="fixed bottom-0 left-0 right-0 bg-white dark:bg-[#1c1c21] border-t-4 border-black dark:border-zinc-700 p-2 z-50 transition-colors duration-300">
-          <div className="max-w-md mx-auto flex justify-between items-center px-4">
+          <div className={cn("max-w-md mx-auto flex justify-between items-center px-4", user?.role === 'Admin' && "max-w-lg")}>
              <TabButton 
               active={activeTab === 'marketplace'} 
               onClick={() => { setActiveTab('marketplace'); handleBackToMarketplace(); }}
@@ -369,6 +421,14 @@ export default function App() {
               icon={<LayoutDashboard />}
               label="My Space"
             />
+            {user?.role === 'Admin' && (
+              <TabButton 
+                active={activeTab === 'admin'} 
+                onClick={() => { setActiveTab('admin'); handleBackToMarketplace(); }}
+                icon={<Settings />}
+                label="Admin"
+              />
+            )}
           </div>
         </nav>
       )}

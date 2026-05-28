@@ -9,9 +9,10 @@ import {
   linkWithPopup
 } from 'firebase/auth';
 import { auth, googleProvider, facebookProvider } from '../lib/firebase';
-import { doc, getDoc, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove, collection, query, where, addDoc, Timestamp } from 'firebase/firestore';
+import { doc, getDoc, getDocs, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove, collection, query, where, addDoc, Timestamp } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { User, ListingRequest, Transaction, Property, ListingType, AgentTier, ROILevel, AreaTrend } from '../types';
+import { TrustScoreEvent, calculateTrustScoreDelta } from '../lib/trustScore';
 
 interface AuthContextType {
   user: User | null;
@@ -32,6 +33,7 @@ interface AuthContextType {
   updateListingRequest: (id: string, updates: Partial<ListingRequest>) => Promise<void>;
   updateUser: (updates: Partial<User>) => Promise<void>;
   addTransaction: (transaction: Transaction) => Promise<void>;
+  updateAgentTrustScore: (agentId: string, event: TrustScoreEvent) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -105,14 +107,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setUser(userData);
             setSavedProperties(userData.savedProperties || []);
 
+            if (userData.accountStatus === 'Suspended' || userData.accountStatus === 'Banned') {
+              setTimeout(() => {
+                logout().catch((err) => console.error("Auto-logout on suspension/ban failed:", err));
+              }, 3000);
+            }
+
             // Dynamically set up listingRequests subscription depending on role
             if (unsubscribeListingsRef.current) {
               unsubscribeListingsRef.current();
             }
 
             let listingsQuery;
-            if (userData.role === 'Agent') {
-              // Agents can view all listing requests in the platform
+            if (userData.role === 'Agent' || userData.role === 'Admin') {
+              // Agents and Admins can view all listing requests in the platform
               listingsQuery = collection(db, 'listingRequests');
             } else {
               // Sellers/Buyers view their own listing requests
@@ -125,6 +133,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 ...doc.data()
               } as any));
               setListingRequests(listings);
+
+              // Client-side expiry check for monthly fee expiration
+              const nowISO = new Date().toISOString();
+              listings.forEach(async (listing) => {
+                if (listing.status === 'Approved' && listing.monthlyFeeExpiresAt && listing.monthlyFeeExpiresAt < nowISO) {
+                  // update listing request status to Inactive and Monthly Unpaid
+                  await updateListingRequest(listing.id, { status: 'Inactive', listingFeeStatus: 'Monthly Unpaid' });
+                  
+                  // update the promoted property document linked to this listingRequestId
+                  if (!isLocalGuest) {
+                    try {
+                      const qProps = query(collection(db, 'properties'), where('listingRequestId', '==', listing.id));
+                      const querySnapshot = await getDocs(qProps);
+                      const promises = querySnapshot.docs.map(docSnap => 
+                        updateDoc(doc(db, 'properties', docSnap.id), { status: 'Inactive' })
+                      );
+                      await Promise.all(promises);
+                    } catch (err) {
+                      console.error("Failed to mark property status as Inactive on Firestore:", err);
+                    }
+                  } else {
+                    const guestProps = localStorage.getItem('localGuestProperties') || '[]';
+                    const parsedProps = JSON.parse(guestProps);
+                    const updatedProps = parsedProps.map((p: any) => 
+                      p.listingRequestId === listing.id ? { ...p, status: 'Inactive' } : p
+                    );
+                    localStorage.setItem('localGuestProperties', JSON.stringify(updatedProps));
+                    window.dispatchEvent(new Event('local_guest_properties_updated'));
+                  }
+                }
+              });
             }, (err) => {
               console.error("Listings dynamic snapshot error:", err);
             });
@@ -333,7 +372,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const logout = async () => {
+  async function logout() {
     try {
       if (isLocalGuest) {
         setIsLocalGuest(false);
@@ -354,7 +393,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.error('Logout Error:', error);
       throw error;
     }
-  };
+  }
 
   const toggleSavedProperty = async (id: string) => {
     if (!user) return;
@@ -495,7 +534,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       acceptsDownPayment: listingRequest.acceptsDownPayment || false,
       listingRequirements: listingRequest.listingRequirements || {},
       listingRequestId: listingRequest.id,
-      assignedAgentId: listingRequest.assignedAgentId || null
+      assignedAgentId: listingRequest.assignedAgentId || null,
+      verificationFeePaid: listingRequest.verificationFeePaid || false
     };
 
     if (isLocalGuest) {
@@ -592,11 +632,63 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const updateAgentTrustScore = async (agentId: string, event: TrustScoreEvent) => {
+    if (isLocalGuest) {
+      const currentScore = user?.id === agentId ? (user?.profileScore ?? 50) : 50;
+      const dClosed = user?.id === agentId ? (user?.dealsClosedCount ?? 0) : 0;
+      const delta = calculateTrustScoreDelta(event);
+      const newScore = Math.max(0, Math.min(100, currentScore + delta));
+      const updates: Partial<User> = { profileScore: newScore };
+      if (newScore >= 90 && dClosed >= 25) {
+        updates.commissionRate = 3;
+      } else if (newScore >= 80 && dClosed >= 10) {
+        updates.commissionRate = 4;
+      } else {
+        updates.commissionRate = 5;
+      }
+      if (user && user.id === agentId) {
+        const updatedUser = { ...user, ...updates };
+        setUser(updatedUser);
+        localStorage.setItem('localGuestUser', JSON.stringify(updatedUser));
+      }
+      return;
+    }
+
+    try {
+      const agentRef = doc(db, 'users', agentId);
+      const agentSnap = await getDoc(agentRef);
+      if (agentSnap.exists()) {
+        const agentData = agentSnap.data();
+        const currentScore = agentData.profileScore !== undefined ? agentData.profileScore : 50;
+        const dClosed = agentData.dealsClosedCount || 0;
+        const delta = calculateTrustScoreDelta(event);
+        const newScore = Math.max(0, Math.min(100, currentScore + delta));
+        
+        const updates: any = { profileScore: newScore };
+        if (newScore >= 90 && dClosed >= 25) {
+          updates.commissionRate = 3;
+        } else if (newScore >= 80 && dClosed >= 10) {
+          updates.commissionRate = 4;
+        } else {
+          updates.commissionRate = 5;
+        }
+
+        await updateDoc(agentRef, updates);
+
+        if (user && user.id === agentId) {
+          setUser(prev => prev ? { ...prev, ...updates } : null);
+        }
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${agentId}`);
+    }
+  };
+
   return (
     <AuthContext.Provider value={{ 
       user, firebaseUser, loading, error, listingRequests, platformListings, savedProperties,
       signInWithGoogle, signInWithFacebook, signInAsGuest, signInWithGoogleMock, signInWithFacebookMock, logout,
-      toggleSavedProperty, addListingRequest, updateListingRequest, updateUser, addTransaction
+      toggleSavedProperty, addListingRequest, updateListingRequest, updateUser, addTransaction, updateAgentTrustScore
     }}>
       {children}
     </AuthContext.Provider>

@@ -37,7 +37,7 @@ service cloud.firestore {
 
     // --- User Profiles ---
     match /users/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
+      allow read: if isSignedIn();
       allow write: if isOwner(userId) || isAdmin();
     }
 
@@ -64,14 +64,43 @@ service cloud.firestore {
 
     // --- Marketplace Properties ---
     match /properties/{propertyId} {
-      allow read: if isSignedIn();
-      allow write: if false; // Only Cloud Functions (Admin SDK) can write
+      allow read: if true;
+      allow write: if isSignedIn();
     }
 
     // --- Transactions Subcollection ---
     match /users/{userId}/transactions/{transactionId} {
       allow read: if isOwner(userId) || isAdmin();
       allow write: if isAdmin(); // Only Cloud Functions/Admin SDK can write
+    }
+
+    // --- Chats & Messages ---
+    match /chats/{chatId} {
+      allow read: if isSignedIn() && request.auth.uid in resource.data.participants;
+      allow create: if isSignedIn() && request.auth.uid in incoming().participants;
+      allow update: if isSignedIn() && request.auth.uid in existing().participants;
+
+      match /messages/{messageId} {
+        allow read: if isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
+        allow create: if isSignedIn() && (request.auth.uid == incoming().senderId) && (request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants);
+      }
+    }
+
+    // --- Disputes ---
+    match /disputes/{disputeId} {
+      allow read: if isAdmin() || (isSignedIn() && (
+        resource.data.buyerId == request.auth.uid || 
+        resource.data.agentId == request.auth.uid
+      ));
+      allow create: if isSignedIn();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // --- Announcements ---
+    match /announcements/{announcementId} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
   }
 }

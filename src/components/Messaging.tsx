@@ -4,6 +4,9 @@ import { MessageCircle, X, Send, Search, ArrowLeft, MoreVertical, CheckCheck, Ma
 import EmojiPicker, { Theme } from 'emoji-picker-react';
 import { cn } from '../lib/utils';
 import { ChatSession, Message } from '../types';
+import { collection, query, where, onSnapshot, doc, setDoc, getDoc, addDoc, orderBy } from 'firebase/firestore';
+import { auth, db, OperationType, handleFirestoreError } from '../lib/firebase';
+import { useAuth } from '../context/AuthContext';
 
 interface MessagingProps {
   isOpen: boolean;
@@ -12,10 +15,22 @@ interface MessagingProps {
 }
 
 export default function Messaging({ isOpen, onClose, initialChatId }: MessagingProps) {
+  const { user } = useAuth();
+  const isMockUser = !user || user.isGuest || user.id === 'guest_local_user' || user.id === 'google_local_user' || user.id === 'facebook_local_user' || !auth.currentUser;
+
   const [activeSessionId, setActiveSessionId] = useState<string | null>(initialChatId || null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
-  
+
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [firestoreMessages, setFirestoreMessages] = useState<any[]>([]);
+  const [blockedMessages, setBlockedMessages] = useState<Record<string, any[]>>({});
+  const [participantDetails, setParticipantDetails] = useState<Record<string, { id: string, name: string, avatar: string }>>({});
+  const [newMessage, setNewMessage] = useState('');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const [handshakeSessions] = useState<Set<string>>(new Set());
+
   // Close emoji picker when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -27,89 +42,64 @@ export default function Messaging({ isOpen, onClose, initialChatId }: MessagingP
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const [sessions, setSessions] = useState<ChatSession[]>([
-    {
-      id: 'session-1',
-      participant: {
-        id: 'a1', // Changed to match agent-1 in mockListings
-        name: 'Agent Musa',
-        avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Musa'
-      },
-      propertyId: 'lento-1',
-      propertyName: 'Lento Classic Villa',
-      lastMessage: 'The survey plan is ready for your review.',
-      lastTimestamp: new Date(Date.now() - 3600000).toISOString(),
-      unreadCount: 2
-    },
-    {
-      id: 'session-2',
-      participant: {
-        id: 'a2', // Changed to match agent-2 in mockListings
-        name: 'Agent Sarah',
-        avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Sarah'
-      },
-      propertyId: 'bh-1',
-      propertyName: 'B&H Terrace Duplex',
-      lastMessage: 'When would you like to schedule the physical inspection?',
-      lastTimestamp: new Date(Date.now() - 86400000).toISOString(),
-      unreadCount: 0
+  const getChatId = (uid1: string, uid2: string, propId: string) => {
+    const sorted = [uid1, uid2].sort();
+    return `${sorted[0]}_${sorted[1]}_${propId}`;
+  };
+
+  const filterMessage = (text: string, inspectionFeePaid: boolean): { allowed: boolean; blockedReason?: string } => {
+    if (inspectionFeePaid) {
+      return { allowed: true };
     }
-  ]);
+    const phonePattern = /(\+?234|0)[789][01]\d{8}/g;
+    const whatsappPattern = /whatsapp|wa\.me|\+234/gi;
+    const urlPattern = /https?:\/\//gi;
 
-  const [handshakeSessions, setHandshakeSessions] = useState<Set<string>>(new Set());
+    if (phonePattern.test(text) || whatsappPattern.test(text) || urlPattern.test(text)) {
+      return {
+        allowed: false,
+        blockedReason: 'Phone numbers and external links are unlocked after inspection fee payment.'
+      };
+    }
+    return { allowed: true };
+  };
 
+  // Sync activeSessionId with prop change
+  useEffect(() => {
+    if (initialChatId) {
+      setActiveSessionId(initialChatId);
+    }
+  }, [initialChatId]);
+
+  // handle open chat event
   useEffect(() => {
     const handleOpenChatEvent = (e: any) => {
       const { agentId, agentName, agentAvatar, propertyId, propertyName } = e.detail || {};
-      if (!agentId) return;
+      if (!agentId || !user) return;
 
-      // Check if session already exists
-      const existingSession = sessions.find(s => s.participant.id === agentId);
-      let sessionId = '';
-      
-      if (existingSession) {
-        sessionId = existingSession.id;
-        setActiveSessionId(sessionId);
-        
-        // Update property context if a specific property was clicked
-        if (propertyId && propertyId !== 'general') {
-           setSessions(prev => prev.map(s => 
-             s.id === sessionId ? { ...s, propertyId, propertyName: propertyName || s.propertyName } : s
-           ));
-        }
-      } else {
-        // Create a new session
-        const newSessionId = `session-${Date.now()}`;
-        sessionId = newSessionId;
-        
-        // Start handshake simulation
-        setHandshakeSessions(prev => new Set(prev).add(newSessionId));
-        setTimeout(() => {
-          setHandshakeSessions(prev => {
-            const next = new Set(prev);
-            next.delete(newSessionId);
-            return next;
+      const chatId = getChatId(user.id, agentId, propertyId || 'general');
+
+      const chatDocRef = doc(db, 'chats', chatId);
+      getDoc(chatDocRef).then((chatSnap) => {
+        if (!chatSnap.exists()) {
+          setDoc(chatDocRef, {
+            participants: [user.id, agentId].sort(),
+            propertyId: propertyId || 'general',
+            propertyName: propertyName || 'General Inquiry',
+            inspectionFeePaid: false,
+            createdAt: new Date().toISOString()
+          }).then(() => {
+            setActiveSessionId(chatId);
+          }).catch((err) => {
+            handleFirestoreError(err, OperationType.WRITE, `chats/${chatId}`);
           });
-        }, 2000);
+        } else {
+          setActiveSessionId(chatId);
+        }
+      }).catch((err) => {
+        handleFirestoreError(err, OperationType.GET, `chats/${chatId}`);
+      });
 
-        const newSession: ChatSession = {
-          id: newSessionId,
-          participant: {
-            id: agentId,
-            name: agentName || 'Real Agent助理',
-            avatar: agentAvatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${agentName || agentId}`
-          },
-          propertyId: propertyId || 'general',
-          propertyName: propertyName || 'General Inquiry',
-          lastMessage: 'Chat started. Messages are end-to-end encrypted.',
-          lastTimestamp: new Date().toISOString(),
-          unreadCount: 0
-        };
-        setSessions(prev => [newSession, ...prev]);
-        setActiveSessionId(newSessionId);
-      }
-      
-      // Auto-reference property in message if provided
       if (propertyName && propertyName !== 'General Inquiry') {
         setNewMessage(`Hello ${agentName || 'Agent'}! I'm interested in "${propertyName}". Could you provide more details?`);
       }
@@ -117,22 +107,101 @@ export default function Messaging({ isOpen, onClose, initialChatId }: MessagingP
 
     window.addEventListener('open-chat', handleOpenChatEvent);
     return () => window.removeEventListener('open-chat', handleOpenChatEvent);
-  }, [sessions]);
+  }, [user, sessions]);
 
-  const [messages, setMessages] = useState<Record<string, Message[]>>({
-    'session-1': [
-      { id: 'm1', senderId: 'agent-1', receiverId: 'user-1', text: 'Hello! I noticed you were interested in the Lento Classic Villa.', timestamp: new Date(Date.now() - 7200000).toISOString() },
-      { id: 'm2', senderId: 'user-1', receiverId: 'agent-1', text: 'Yes, I wanted to know if the price is negotiable.', timestamp: new Date(Date.now() - 7000000).toISOString() },
-      { id: 'm3', senderId: 'agent-1', receiverId: 'user-1', text: 'The survey plan is ready for your review.', timestamp: new Date(Date.now() - 3600000).toISOString() },
-    ],
-    'session-2': [
-      { id: 'm4', senderId: 'agent-2', receiverId: 'user-1', text: 'Hi! Let me know if you have any questions about the Katampe property.', timestamp: new Date(Date.now() - 90000000).toISOString() },
-      { id: 'm5', senderId: 'user-1', receiverId: 'agent-2', text: 'When would you like to schedule the physical inspection?', timestamp: new Date(Date.now() - 86400000).toISOString() },
-    ]
-  });
+  // Query chats on mount
+  useEffect(() => {
+    if (isMockUser) return;
 
-  const [newMessage, setNewMessage] = useState('');
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+    const chatsQuery = query(
+      collection(db, 'chats'),
+      where('participants', 'array-contains', user.id)
+    );
+
+    const unsubscribe = onSnapshot(chatsQuery, (snapshot) => {
+      const loadedSessions: any[] = [];
+      snapshot.forEach((docDoc) => {
+        const data = docDoc.data();
+        const otherUserId = data.participants.find((id: string) => id !== user.id) || '';
+        loadedSessions.push({
+          id: docDoc.id,
+          propertyId: data.propertyId,
+          propertyName: data.propertyName,
+          inspectionFeePaid: !!data.inspectionFeePaid,
+          createdAt: data.createdAt,
+          participant: {
+            id: otherUserId,
+            name: 'Loading...',
+            avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${otherUserId}`
+          },
+          lastMessage: data.lastMessage || 'No messages yet',
+          lastTimestamp: data.lastTimestamp || data.createdAt || new Date().toISOString(),
+          unreadCount: data.unreadCount?.[user.id] || 0
+        });
+      });
+
+      setSessions(loadedSessions);
+
+      // Fetch participants info
+      loadedSessions.forEach((session) => {
+        const otherId = session.participant.id;
+        if (otherId && !participantDetails[otherId]) {
+          getDoc(doc(db, 'users', otherId)).then((userDoc) => {
+            if (userDoc.exists()) {
+              const uData = userDoc.data();
+              const fullName = uData.firstName && uData.lastName 
+                ? `${uData.firstName} ${uData.lastName}` 
+                : (uData.name || `User ${otherId.slice(0, 5)}`);
+              const avatar = uData.avatarUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${fullName}`;
+              setParticipantDetails(prev => ({
+                ...prev,
+                [otherId]: { id: otherId, name: fullName, avatar }
+              }));
+            }
+          }).catch((err) => {
+            console.error("Failed to load details for", otherId, err);
+          });
+        }
+      });
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'chats');
+    });
+
+    return () => unsubscribe();
+  }, [user?.id]);
+
+  // Query messages for activeSessionId
+  useEffect(() => {
+    if (isMockUser || !activeSessionId) {
+      setFirestoreMessages([]);
+      return;
+    }
+
+    const messagesQuery = query(
+      collection(db, 'chats', activeSessionId, 'messages'),
+      orderBy('timestamp', 'asc')
+    );
+
+    const unsubscribe = onSnapshot(messagesQuery, (snapshot) => {
+      const msgs: any[] = [];
+      snapshot.forEach((msgDoc) => {
+        const data = msgDoc.data();
+        msgs.push({
+          id: msgDoc.id,
+          senderId: data.senderId,
+          receiverId: data.receiverId || '',
+          text: data.text,
+          timestamp: data.timestamp,
+          blocked: !!data.blocked
+        });
+      });
+      setFirestoreMessages(msgs);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, `chats/${activeSessionId}/messages`);
+    });
+
+    return () => unsubscribe();
+  }, [activeSessionId]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -142,41 +211,121 @@ export default function Messaging({ isOpen, onClose, initialChatId }: MessagingP
     if (activeSessionId) {
       scrollToBottom();
     }
-  }, [activeSessionId, messages]);
+  }, [activeSessionId, firestoreMessages, blockedMessages]);
 
-  const handleSendMessage = () => {
-    if (!newMessage.trim() || !activeSessionId) return;
+  const handleSendMessage = async () => {
+    if (!newMessage.trim() || !activeSessionId || !user) return;
 
-    // Mask numbers: replace any sequence of digits with '###'
-    const maskedText = newMessage.replace(/\d+/g, '###');
+    const activeSess = sessions.find(s => s.id === activeSessionId);
+    if (!activeSess) return;
 
-    const msg: Message = {
-      id: `m-${Date.now()}`,
-      senderId: 'user-1',
-      receiverId: sessions.find(s => s.id === activeSessionId)?.participant.id || '',
-      text: maskedText,
-      timestamp: new Date().toISOString()
-    };
+    const currentInspectionFeePaid = !!activeSess.inspectionFeePaid;
+    const filterResult = filterMessage(newMessage, currentInspectionFeePaid);
 
-    setMessages(prev => ({
-      ...prev,
-      [activeSessionId]: [...(prev[activeSessionId] || []), msg]
-    }));
+    if (!filterResult.allowed) {
+      const blockedMsg = {
+        id: `blocked-${Date.now()}`,
+        senderId: user.id,
+        receiverId: activeSess.participant.id,
+        text: newMessage,
+        timestamp: new Date().toISOString(),
+        blocked: true,
+        blockedReason: filterResult.blockedReason || 'Content blocked'
+      };
 
-    setSessions(prev => prev.map(s => 
-      s.id === activeSessionId ? { ...s, lastMessage: maskedText, lastTimestamp: new Date().toISOString() } : s
-    ));
+      setBlockedMessages(prev => ({
+        ...prev,
+        [activeSessionId]: [...(prev[activeSessionId] || []), blockedMsg]
+      }));
 
-    setNewMessage('');
-    setShowEmojiPicker(false);
+      setNewMessage('');
+      setShowEmojiPicker(false);
+      return;
+    }
+
+    try {
+      const messagesCollectionRef = collection(db, 'chats', activeSessionId, 'messages');
+      await addDoc(messagesCollectionRef, {
+        senderId: user.id,
+        receiverId: activeSess.participant.id,
+        text: newMessage,
+        timestamp: new Date().toISOString(),
+        blocked: false
+      });
+
+      const chatDocRef = doc(db, 'chats', activeSessionId);
+      await setDoc(chatDocRef, {
+        lastMessage: newMessage,
+        lastTimestamp: new Date().toISOString()
+      }, { merge: true });
+
+      setNewMessage('');
+      setShowEmojiPicker(false);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `chats/${activeSessionId}/messages`);
+    }
   };
 
   const onEmojiClick = (emojiData: any) => {
-    setNewMessage(prev => prev + emojiData.emoji);
+    setNewMessage((prev) => prev + emojiData.emoji);
   };
 
-  const activeSession = sessions.find(s => s.id === activeSessionId);
-  const currentMessages = activeSessionId ? messages[activeSessionId] || [] : [];
+  if (isMockUser) {
+    return (
+      <AnimatePresence>
+        {isOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={onClose}
+              className="fixed inset-0 bg-brand-black/60 backdrop-blur-sm z-[60] md:hidden"
+            />
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', stiffness: 450, damping: 35 }}
+              className="fixed top-0 right-0 h-full w-full md:w-[450px] bg-brand-gray dark:bg-[#1c1c21] z-[70] border-l-4 border-brand-black dark:border-zinc-800 shadow-2xl flex flex-col justify-center items-center p-8 text-center"
+            >
+              <div className="p-4 bg-brand-teal text-brand-black border-4 border-brand-black mb-6 shadow-brutal-xs">
+                <Lock size={36} />
+              </div>
+              <h2 className="text-xl font-display font-black uppercase italic text-brand-black dark:text-white mb-2">ACCESS RESTRICTED</h2>
+              <p className="text-xs font-medium text-zinc-500 uppercase tracking-widest leading-relaxed mb-6">
+                Please sign in with Google or Facebook to interact with registered agents.
+              </p>
+              <button onClick={onClose} className="brutalist-button-black w-full py-3 font-bold uppercase tracking-widest text-xs">
+                Go Back
+              </button>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+    );
+  }
+
+  const enhancedSessions = sessions.map((session) => {
+    const details = participantDetails[session.participant.id];
+    return {
+      ...session,
+      participant: {
+        ...session.participant,
+        name: details?.name || session.participant.name || 'User',
+        avatar: details?.avatar || session.participant.avatar
+      }
+    };
+  });
+
+  const activeSession = enhancedSessions.find((s) => s.id === activeSessionId);
+
+  const currentMessages = activeSessionId
+    ? [
+        ...firestoreMessages,
+        ...(blockedMessages[activeSessionId] || [])
+      ].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+    : [];
 
   return (
     <AnimatePresence>
@@ -233,14 +382,14 @@ export default function Messaging({ isOpen, onClose, initialChatId }: MessagingP
                   </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto">
-                  {sessions.length > 0 ? (
-                    sessions.sort((a,b) => new Date(b.lastTimestamp || 0).getTime() - new Date(a.lastTimestamp || 0).getTime()).map((session) => (
+                <div className="flex-1 overflow-y-auto w-full">
+                  {enhancedSessions.length > 0 ? (
+                    enhancedSessions.sort((a,b) => new Date(b.lastTimestamp || 0).getTime() - new Date(a.lastTimestamp || 0).getTime()).map((session) => (
                       <button
                         key={session.id}
                         onClick={() => setActiveSessionId(session.id)}
                         className={cn(
-                          "w-full p-4 flex items-center gap-3 border-b border-zinc-100 dark:border-zinc-800 transition-colors hover:bg-white dark:hover:bg-zinc-900 text-left relative group",
+                          "w-full p-4 flex items-center gap-3 border-b border-zinc-105 dark:border-zinc-801 transition-colors hover:bg-white dark:hover:bg-zinc-900 text-left relative group",
                           activeSessionId === session.id && "bg-white dark:bg-zinc-900 border-r-4 border-r-brand-teal"
                         )}
                       >
@@ -250,7 +399,9 @@ export default function Messaging({ isOpen, onClose, initialChatId }: MessagingP
                         <div className="flex-1 min-w-0">
                           <div className="flex justify-between items-start mb-0.5">
                             <span className="font-display font-black uppercase text-xs truncate text-brand-black dark:text-white">{session.participant.name}</span>
-                            <span className="text-[9px] font-bold text-zinc-500">{new Date(session.lastTimestamp || 0).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                            <span className="text-[9px] font-bold text-zinc-500">
+                              {new Date(session.lastTimestamp || 0).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
                           </div>
                           <p className="text-[10px] font-black uppercase text-brand-teal mb-1 truncate">{session.propertyName}</p>
                           <p className={cn(
@@ -293,7 +444,7 @@ export default function Messaging({ isOpen, onClose, initialChatId }: MessagingP
                           <h3 className="font-display font-black uppercase text-xs text-brand-black dark:text-white leading-tight">{activeSession.participant.name}</h3>
                           <div className="flex items-center gap-1">
                             <div className="w-1.5 h-1.5 bg-brand-teal rounded-full animate-pulse" />
-                            <span className="text-[9px] font-black uppercase text-zinc-400">Active Agent</span>
+                            <span className="text-[9px] font-black uppercase text-zinc-400 font-mono">Active Agent</span>
                           </div>
                         </div>
                       </div>
@@ -315,7 +466,7 @@ export default function Messaging({ isOpen, onClose, initialChatId }: MessagingP
                     </div>
 
                     {/* Encryption Banner */}
-                    <div className="px-4 py-2 bg-zinc-100 dark:bg-zinc-800/50 flex items-center justify-center gap-2 border-b border-zinc-200 dark:border-zinc-800">
+                    <div className="px-4 py-2 bg-zinc-100 dark:bg-zinc-850 flex items-center justify-center gap-2 border-b border-zinc-200 dark:border-zinc-800">
                        <Lock size={10} className="text-zinc-400" />
                        <span className="text-[8px] font-black uppercase text-zinc-400 tracking-widest leading-none">
                          Messages are secured with end-to-end encryption
@@ -349,9 +500,31 @@ export default function Messaging({ isOpen, onClose, initialChatId }: MessagingP
                           </div>
 
                           {currentMessages.map((msg, i) => {
-                            const isMe = msg.senderId === 'user-1';
+                            const isMe = msg.senderId === user?.id;
+                            if (msg.blocked) {
+                              return (
+                                <div key={msg.id || i} className={cn(
+                                  "flex flex-col max-w-[80%]",
+                                  isMe ? "ml-auto items-end" : "mr-auto items-start"
+                                )}>
+                                  <div className="p-3 text-xs border-2 border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 text-zinc-550 dark:text-zinc-400 rounded-lg shadow-brutal-xs flex flex-col gap-1.5 opacity-80">
+                                    <div className="line-through select-none italic text-zinc-400 dark:text-zinc-500">"{msg.text}"</div>
+                                    <div className="flex items-center gap-1.5 text-[9px] font-black uppercase text-red-500 dark:text-red-400 font-mono">
+                                      <Lock size={12} className="shrink-0 text-red-500 dark:text-red-400" />
+                                      <span>{msg.blockedReason || 'Phone numbers and external links are unlocked after inspection fee payment.'}</span>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-1 mt-1 px-1">
+                                    <span className="text-[8px] font-black uppercase text-zinc-400">
+                                      {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            }
+
                             return (
-                              <div key={msg.id} className={cn(
+                              <div key={msg.id || i} className={cn(
                                 "flex flex-col max-w-[80%]",
                                 isMe ? "ml-auto items-end" : "mr-auto items-start"
                               )}>

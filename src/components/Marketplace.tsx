@@ -76,7 +76,9 @@ export default function Marketplace() {
       const loadLocalProps = () => {
         const saved = localStorage.getItem('localGuestProperties');
         if (saved) {
-          setLiveProperties(JSON.parse(saved));
+          const nowStr = new Date().toISOString();
+          const parsed = JSON.parse(saved);
+          setLiveProperties(parsed.filter((p: any) => p.expiresAt > nowStr && p.status !== 'Inactive'));
         } else {
           setLiveProperties([]);
         }
@@ -92,7 +94,7 @@ export default function Marketplace() {
       const nowStr = new Date().toISOString();
       const list = snapshot.docs
         .map(doc => ({ id: doc.id, ...doc.data() } as any))
-        .filter((p: any) => p.expiresAt > nowStr);
+        .filter((p: any) => p.expiresAt > nowStr && p.status !== 'Inactive');
       setLiveProperties(list);
     }, (error) => {
       console.error("Firestore error loading marketplace live properties: ", error);
