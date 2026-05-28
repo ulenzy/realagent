@@ -105,18 +105,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setUser(userData);
             setSavedProperties(userData.savedProperties || []);
 
-            // Dynamically set up properties subscription depending on role
+            // Dynamically set up listingRequests subscription depending on role
             if (unsubscribeListingsRef.current) {
               unsubscribeListingsRef.current();
             }
 
             let listingsQuery;
             if (userData.role === 'Agent') {
-              // Agents can list and view all properties in the platform
-              listingsQuery = collection(db, 'properties');
+              // Agents can view all listing requests in the platform
+              listingsQuery = collection(db, 'listingRequests');
             } else {
-              // Sellers/Buyers view their own listings
-              listingsQuery = query(collection(db, 'properties'), where('ownerId', '==', fUser.uid));
+              // Sellers/Buyers view their own listing requests
+              listingsQuery = query(collection(db, 'listingRequests'), where('ownerId', '==', fUser.uid));
             }
 
             unsubscribeListingsRef.current = onSnapshot(listingsQuery, (snapshot) => {
@@ -134,7 +134,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               unsubscribePlatformListingsRef.current();
             }
 
-            const platformQuery = query(collection(db, 'properties'), where('status', '==', 'Agent Bidding'));
+            const platformQuery = query(collection(db, 'listingRequests'), where('status', '==', 'Agent Bidding'));
             unsubscribePlatformListingsRef.current = onSnapshot(platformQuery, (snapshot) => {
               const pListings = snapshot.docs.map(doc => ({
                 id: doc.id,
@@ -390,12 +390,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
     try {
-      await setDoc(doc(db, 'properties', request.id), {
+      await setDoc(doc(db, 'listingRequests', request.id), {
         ...request,
         ownerId: user.id
       });
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `properties/${request.id}`);
+      handleFirestoreError(error, OperationType.WRITE, `listingRequests/${request.id}`);
     }
   };
 
@@ -494,7 +494,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       commission: listingRequest.commission || 5,
       acceptsDownPayment: listingRequest.acceptsDownPayment || false,
       listingRequirements: listingRequest.listingRequirements || {},
-      isPromotedProperty: true,
+      listingRequestId: listingRequest.id,
       assignedAgentId: listingRequest.assignedAgentId || null
     };
 
@@ -533,10 +533,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
     try {
-      await updateDoc(doc(db, 'properties', id), updates);
+      await updateDoc(doc(db, 'listingRequests', id), updates);
 
       if (updates.status === 'Approved') {
-        const docRef = doc(db, 'properties', id);
+        const docRef = doc(db, 'listingRequests', id);
         const snap = await getDoc(docRef);
         if (snap.exists()) {
           const listingRequest = { id: snap.id, ...snap.data(), ...updates } as ListingRequest;
@@ -544,7 +544,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `properties/${id}`);
+      handleFirestoreError(error, OperationType.UPDATE, `listingRequests/${id}`);
     }
   };
 

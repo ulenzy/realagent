@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Building2, MapPin, FileText, User, ArrowLeft, ArrowRight, CheckCircle2, Home, Landmark, Trees, Factory, Banknote, Map, Hash, Info, Phone, Mail, UserCircle, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { Building2, MapPin, FileText, User, ArrowLeft, ArrowRight, CheckCircle2, Home, Landmark, Trees, Factory, Banknote, Map, Hash, Info, Phone, Mail, UserCircle, ShieldAlert, ShieldCheck, Trash2, FileCode, Paperclip } from 'lucide-react';
 import { cn, formatNumberString, parseFormattedNumber, formatNumber } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { MapContainer, TileLayer, useMapEvents } from 'react-leaflet';
@@ -39,6 +39,7 @@ type PropertyType = 'House' | 'Apartment' | 'Commercial' | 'Land' | 'Industrial'
 const initialFormData = {
   propertyType: '' as PropertyType | '',
   title: '',
+  titleDocumentFile: null as File | null,
   description: '',
   price: '',
   state: '',
@@ -55,6 +56,9 @@ const initialFormData = {
   floorNumber: '',
   condition: '' as 'New' | 'Renovated' | 'Fair' | 'Needs Work' | '',
   listingPurpose: '' as 'Sale' | 'Rent' | 'Joint Venture' | '',
+  listingType: 'Sale' as 'Sale' | 'Rent',
+  propertySubType: '',
+  sizeSqm: '',
   openToJV: false,
   jvSharingFormula: '',
   jvPremium: '',
@@ -89,9 +93,11 @@ const initialFormData = {
 
 import { useAuth } from '../context/AuthContext';
 import { useNavigation } from '../context/NavigationContext';
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { storage } from '../lib/firebase';
 
 export default function ListingForm() {
-  const { addListingRequest: onSubmit } = useAuth();
+  const { addListingRequest: onSubmit, user } = useAuth();
   const { handleBackToMarketplace: onBack } = useNavigation();
 
   const [step, setStep] = useState(1);
@@ -101,6 +107,9 @@ export default function ListingForm() {
   const [customAmenity, setCustomAmenity] = useState('');
 
   const [formData, setFormData] = useState(initialFormData);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [showDraftBanner, setShowDraftBanner] = useState(false);
   const isLoaded = useRef(false);
 
@@ -197,14 +206,32 @@ export default function ListingForm() {
                         pinVal.includes('maps.google') || 
                         pinVal.includes('goo.gl') || 
                         pinVal.includes('maps.app.goo.gl');
-    const met = !!(
-      reqs.titleDocumentFileName &&
+    
+    // Core requirements
+    const coreReqsMet = !!(
+      formData.titleDocumentFile &&
       reqs.photos.length >= 3 &&
       isValidMaps &&
       reqs.physicalConditionDescription.length >= 100
     );
-    setRequirementsMet(met);
-  }, [formData.listingRequirements]);
+
+    // New required fields
+    const isLand = formData.propertySubType === 'Land';
+    const bedroomsVal = Number(formData.bedrooms);
+    const bathroomsVal = Number(formData.bathrooms);
+
+    const newReqsMet = !!(
+      (formData.listingType === 'Sale' || formData.listingType === 'Rent') &&
+      formData.propertySubType &&
+      Number(formData.sizeSqm) > 0 &&
+      (!isLand ? (bedroomsVal >= 0 && bedroomsVal <= 10) : bedroomsVal === 0) &&
+      (!isLand ? (bathroomsVal >= 0 && bathroomsVal <= 10) : bathroomsVal === 0) &&
+      formData.estateName?.trim() &&
+      formData.amenities.length >= 1
+    );
+
+    setRequirementsMet(coreReqsMet && newReqsMet);
+  }, [formData, formData.listingRequirements]);
 
   // Sync googlePinLink and locationPin
   useEffect(() => {
@@ -326,31 +353,72 @@ export default function ListingForm() {
 
   const currentFee = calculateTotal();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
-    
+    setUploadError(null);
+    setUploadProgress(0);
+
+    const listingId = `req-${Date.now()}`;
+    const userId = user?.id || 'guest';
+    const file = formData.titleDocumentFile;
+
+    let finalDocUrl = '';
+    let finalDocName = formData.listingRequirements.titleDocumentFileName;
+    let finalDocType = formData.listingRequirements.titleDocumentFileType;
+
+    if (file) {
+      try {
+        const timestamp = Date.now();
+        const extension = file.name.split('.').pop()?.toLowerCase() || '';
+        const storagePath = `listingDocuments/${userId}/${listingId}/title-${timestamp}.${extension}`;
+        
+        const fileRef = ref(storage, storagePath);
+        const uploadTask = uploadBytesResumable(fileRef, file);
+
+        await new Promise<void>((resolve, reject) => {
+          uploadTask.on(
+            'state_changed',
+            (snapshot) => {
+              const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+              setUploadProgress(Math.round(progress));
+            },
+            (error) => {
+              reject(error);
+            },
+            () => {
+              resolve();
+            }
+          );
+        });
+
+        finalDocUrl = await getDownloadURL(uploadTask.snapshot.ref);
+      } catch (err: any) {
+        console.error('File upload failed in handleSubmit:', err);
+        setUploadProgress(null);
+        setUploadError(err?.message || 'Failed to upload title document to safe storage. Please try again.');
+        setIsSubmitting(false);
+        return; // BLOCK submission!
+      }
+    }
+
     // Calculate expiration date (default 30 days + extensions)
     const expirationDate = new Date();
     expirationDate.setDate(expirationDate.getDate() + 30 + formData.extraDays);
 
-    // Simulate API call
-    setTimeout(() => {
-      setIsSubmitting(false);
-      setIsSuccess(true);
-      localStorage.removeItem('realagents_listing_draft');
-      
-      let generatedTitle = formData.title;
-      if (!generatedTitle) {
-        if (formData.propertyType === 'Land') {
-          generatedTitle = `${formData.landSize} SQM ${formData.zoningType} Land in ${formData.address || formData.lga}`;
-        } else {
-          generatedTitle = `${formData.condition} ${formData.bedrooms ? formData.bedrooms + ' Bedroom ' : ''}${formData.propertyType} in ${formData.address || formData.lga}`;
-        }
+    let generatedTitle = formData.title;
+    if (!generatedTitle) {
+      if (formData.propertySubType === 'Land' || formData.propertyType === 'Land') {
+        generatedTitle = `${formData.sizeSqm || formData.landSize} SQM Land in ${formData.address || formData.lga}`;
+      } else {
+        generatedTitle = `${formData.condition} ${formData.bedrooms ? formData.bedrooms + ' Bedroom ' : ''}${formData.propertySubType || formData.propertyType} in ${formData.address || formData.lga}`;
       }
+    }
 
+    try {
       // Notify parent about new listing
-      onSubmit({
+      await onSubmit({
+        id: listingId,
         title: generatedTitle,
         type: formData.propertyType || 'House',
         price: Number(parseFormattedNumber(formData.price)) || 0,
@@ -363,13 +431,35 @@ export default function ListingForm() {
         furnishing: formData.furnishing,
         trustScore: getTrustScore(),
         googlePinLink: formData.googlePinLink,
-        listingRequirements: formData.listingRequirements,
+        listingRequirements: {
+          ...formData.listingRequirements,
+          titleDocumentFileName: finalDocName,
+          titleDocumentFileType: finalDocType,
+          titleDocumentUrl: finalDocUrl
+        },
         documents: formData.documents.map(d => ({
           name: d,
           ...formData.documentFiles[d]
-        }))
+        })),
+        listingType: formData.listingType || 'Sale',
+        propertySubType: formData.propertySubType,
+        sizeSqm: Number(formData.sizeSqm) || 0,
+        bedrooms: Number(formData.bedrooms) || 0,
+        bathrooms: Number(formData.bathrooms) || 0,
+        estateName: formData.estateName,
+        amenities: formData.amenities,
+        listingFeeStatus: 'Unpaid',
+        dealStatus: 'Open'
       } as any);
-    }, 2000);
+
+      setIsSubmitting(false);
+      setIsSuccess(true);
+      localStorage.removeItem('realagents_listing_draft');
+    } catch (err: any) {
+      console.error('Error submitting listing request:', err);
+      setUploadError(err?.message || 'Failed to submit listing. Please verify your information.');
+      setIsSubmitting(false);
+    }
   };
 
   const handleDocumentToggle = (docName: string) => {
@@ -414,21 +504,54 @@ export default function ListingForm() {
   };
 
   const handleTitleDocUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFileError(null);
+    setUploadError(null);
+    setUploadProgress(null);
     const file = e.target.files?.[0];
     if (file) {
       const extension = file.name.split('.').pop()?.toLowerCase() || '';
-      if (['jpg', 'jpeg', 'png', 'pdf'].includes(extension)) {
-        const mimeType = extension === 'pdf' ? 'application/pdf' : 'image/' + (extension === 'jpg' || extension === 'jpeg' ? 'jpeg' : extension);
-        setFormData(prev => ({
-          ...prev,
-          listingRequirements: {
-            ...prev.listingRequirements,
-            titleDocumentFileName: file.name,
-            titleDocumentFileType: mimeType
-          }
-        }));
+      const allowedExtensions = ['jpg', 'jpeg', 'png', 'pdf', 'docx'];
+      if (!allowedExtensions.includes(extension)) {
+        setFileError('Invalid file type. Only PDF, JPG, PNG, and DOCX are allowed.');
+        return;
       }
+      if (file.size > 10 * 1024 * 1024) {
+        setFileError('File footprint is too large. Max size allowed is 10MB.');
+        return;
+      }
+      
+      let mimeType = file.type;
+      if (!mimeType) {
+        if (extension === 'pdf') mimeType = 'application/pdf';
+        else if (extension === 'docx') mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        else mimeType = 'image/' + (extension === 'jpg' ? 'jpeg' : extension);
+      }
+      
+      setFormData(prev => ({
+        ...prev,
+        titleDocumentFile: file,
+        listingRequirements: {
+          ...prev.listingRequirements,
+          titleDocumentFileName: file.name,
+          titleDocumentFileType: mimeType
+        }
+      }));
     }
+  };
+
+  const handleRemoveTitleDoc = () => {
+    setFileError(null);
+    setUploadError(null);
+    setUploadProgress(null);
+    setFormData(prev => ({
+      ...prev,
+      titleDocumentFile: null,
+      listingRequirements: {
+        ...prev.listingRequirements,
+        titleDocumentFileName: '',
+        titleDocumentFileType: ''
+      }
+    }));
   };
 
   const handlePhotosUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -521,7 +644,7 @@ export default function ListingForm() {
       {/* Step Indicator */}
       <div className="flex flex-col gap-4 mb-10">
         <div className="flex items-center gap-2">
-          {[1, 2, 3, 4].map((s) => (
+          {[1, 2, 3, 4, 5].map((s) => (
             <div 
               key={s} 
               className={cn(
@@ -532,12 +655,13 @@ export default function ListingForm() {
           ))}
         </div>
         <div className="flex justify-between">
-          <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400 italic">Step {step} of 4</span>
+          <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400 italic">Step {step} of 5</span>
           <span className="text-[9px] font-black uppercase tracking-widest text-brand-teal italic">
             {step === 1 && "Category Select"}
-            {step === 2 && "Core Specifics"}
-            {step === 3 && "Listing Requirements"}
-            {step === 4 && "Contact Identity"}
+            {step === 2 && "Property Details"}
+            {step === 3 && "Core Specifics"}
+            {step === 4 && "Listing Requirements"}
+            {step === 5 && "Contact Identity"}
           </span>
         </div>
       </div>
@@ -606,7 +730,8 @@ export default function ListingForm() {
                     onClick={() => {
                       setFormData({
                         ...formData, 
-                        listingPurpose: p as 'Sale' | 'Rent'
+                        listingPurpose: p as 'Sale' | 'Rent',
+                        listingType: p as 'Sale' | 'Rent'
                       });
                     }}
                     className={cn(
@@ -628,7 +753,7 @@ export default function ListingForm() {
                 disabled={!formData.propertyType || !formData.listingPurpose}
                 className="w-full bg-brand-teal text-brand-black border-4 border-brand-black font-display font-black uppercase tracking-widest text-lg py-4 flex items-center justify-center gap-2 shadow-brutal-md hover:-translate-y-1 hover:shadow-brutal-lg transition-all disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-brutal-md group"
               >
-                Continue to Specifics
+                Continue to Details
                 <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
               </button>
             </div>
@@ -637,7 +762,240 @@ export default function ListingForm() {
 
         {step === 2 && (
           <motion.div 
-            key="step2"
+            key="step2-details"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            className="flex flex-col gap-6"
+          >
+            <h2 className="text-3xl font-display font-black italic uppercase tracking-tighter">
+              Property <span className="text-brand-teal">Details</span>
+            </h2>
+
+            <div className="space-y-6">
+              <div className="brutalist-card-flat p-4 bg-zinc-50 dark:bg-zinc-900/50 space-y-4">
+                {/* Listing Type Toggle */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="flex items-center justify-between text-[10px] font-black uppercase text-zinc-500 tracking-widest pl-1">
+                    <span>Listing Type</span>
+                  </label>
+                  <div className="flex gap-2">
+                    {['Sale', 'Rent'].map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => setFormData({...formData, listingType: t as 'Sale' | 'Rent', listingPurpose: t as 'Sale' | 'Rent'})}
+                        className={cn(
+                          "flex-1 py-3 border-2 font-display font-black uppercase text-xs transition-all",
+                          formData.listingType === t 
+                            ? "bg-brand-black text-white border-brand-black" 
+                            : "bg-white dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-400"
+                        )}
+                      >
+                        For {t}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Property Sub-Type Dropdown */}
+                <div className="flex flex-col gap-1.5 pt-2">
+                  <label className="flex justify-between items-center text-[10px] font-black uppercase text-zinc-500 tracking-widest pl-1">
+                    <span>Property Sub-Type <span className="text-red-500">*</span></span>
+                  </label>
+                  <select 
+                    className="brutalist-input-large h-[58px]"
+                    value={formData.propertySubType}
+                    onChange={e => {
+                      const val = e.target.value;
+                      setFormData(prev => ({
+                        ...prev, 
+                        propertySubType: val,
+                        bedrooms: val === 'Land' ? '0' : prev.bedrooms,
+                        bathrooms: val === 'Land' ? '0' : prev.bathrooms
+                      }));
+                    }}
+                    required
+                  >
+                    <option value="" disabled>Select Sub-Type</option>
+                    {['House', 'Duplex', 'Terrace', 'Bungalow', 'Semi-detached', 'Fully-detached', 'Apartment', 'Land'].map(opt => (
+                      <option key={opt} value={opt}>{opt}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Size in SQM */}
+                <div className="flex flex-col gap-1.5 pt-2">
+                  <label className="flex justify-between items-center text-[10px] font-black uppercase text-zinc-500 tracking-widest pl-1">
+                    <span>Size in SQM <span className="text-red-500">*</span></span>
+                  </label>
+                  <input 
+                    type="number"
+                    placeholder="e.g. 600"
+                    className="brutalist-input-large font-mono"
+                    value={formData.sizeSqm}
+                    onChange={e => setFormData({...formData, sizeSqm: e.target.value})}
+                    required
+                  />
+                </div>
+
+                {/* Bedrooms & Bathrooms Steppers */}
+                <div className="grid grid-cols-2 gap-4 pt-2">
+                  <div className="flex flex-col gap-1.5">
+                    <label className="flex justify-between items-center text-[10px] font-black uppercase text-zinc-500 tracking-widest pl-1">
+                      <span>Bedrooms <span className="text-red-500">*</span></span>
+                    </label>
+                    <div className="flex items-center border-2 border-brand-black dark:border-zinc-700 bg-white dark:bg-zinc-800 overflow-hidden select-none">
+                      <button 
+                        type="button"
+                        disabled={formData.propertySubType === 'Land' || Number(formData.bedrooms || 0) <= 0}
+                        onClick={() => {
+                          const currentVal = Math.max(0, Number(formData.bedrooms || 0) - 1);
+                          setFormData({...formData, bedrooms: `${currentVal}`});
+                        }}
+                        className="p-3 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 font-bold w-12 border-r-2 border-brand-black dark:border-zinc-700 disabled:opacity-50"
+                      >
+                        -
+                      </button>
+                      <div className="flex-1 text-center font-display font-black text-lg">
+                        {formData.propertySubType === 'Land' ? 0 : (formData.bedrooms || 0)}
+                      </div>
+                      <button 
+                        type="button"
+                        disabled={formData.propertySubType === 'Land' || Number(formData.bedrooms || 0) >= 10}
+                        onClick={() => {
+                          const currentVal = Math.min(10, Number(formData.bedrooms || 0) + 1);
+                          setFormData({...formData, bedrooms: `${currentVal}`});
+                        }}
+                        className="p-3 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 font-bold w-12 border-l-2 border-brand-black dark:border-zinc-700 disabled:opacity-50"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="flex justify-between items-center text-[10px] font-black uppercase text-zinc-500 tracking-widest pl-1">
+                      <span>Bathrooms <span className="text-red-500">*</span></span>
+                    </label>
+                    <div className="flex items-center border-2 border-brand-black dark:border-zinc-700 bg-white dark:bg-zinc-800 overflow-hidden select-none">
+                      <button 
+                        type="button"
+                        disabled={formData.propertySubType === 'Land' || Number(formData.bathrooms || 0) <= 0}
+                        onClick={() => {
+                          const currentVal = Math.max(0, Number(formData.bathrooms || 0) - 1);
+                          setFormData({...formData, bathrooms: `${currentVal}`});
+                        }}
+                        className="p-3 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 font-bold w-12 border-r-2 border-brand-black dark:border-zinc-700 disabled:opacity-50"
+                      >
+                        -
+                      </button>
+                      <div className="flex-1 text-center font-display font-black text-lg">
+                        {formData.propertySubType === 'Land' ? 0 : (formData.bathrooms || 0)}
+                      </div>
+                      <button 
+                        type="button"
+                        disabled={formData.propertySubType === 'Land' || Number(formData.bathrooms || 0) >= 10}
+                        onClick={() => {
+                          const currentVal = Math.min(10, Number(formData.bathrooms || 0) + 1);
+                          setFormData({...formData, bathrooms: `${currentVal}`});
+                        }}
+                        className="p-3 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 font-bold w-12 border-l-2 border-brand-black dark:border-zinc-700 disabled:opacity-50"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Estate/Development Name */}
+                <div className="flex flex-col gap-1.5 pt-2">
+                  <label className="flex justify-between items-center text-[10px] font-black uppercase text-zinc-500 tracking-widest pl-1">
+                    <span>Estate / Development Name <span className="text-red-500">*</span></span>
+                  </label>
+                  <input 
+                    type="text" 
+                    placeholder="e.g. Pinnock Beach Estate"
+                    className="brutalist-input-large"
+                    value={formData.estateName}
+                    onChange={e => setFormData({...formData, estateName: e.target.value})}
+                    required
+                  />
+                </div>
+
+                {/* Amenities checklist */}
+                <div className="flex flex-col gap-1.5 pt-2">
+                  <label className="flex justify-between items-center text-[10px] font-black uppercase text-zinc-500 tracking-widest pl-1">
+                    <span>Amenities (Select at least one) <span className="text-red-500">*</span></span>
+                  </label>
+                  <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto p-2 border-2 border-brand-black dark:border-zinc-700 bg-white dark:bg-zinc-800">
+                    {['Electricity', 'Borehole', 'Security', 'Road Access', 'Fence', 'Gate', 'BQ', 'Swimming Pool', 'Gym', 'Playground'].map((amenityOption) => {
+                      const isChecked = formData.amenities.includes(amenityOption);
+                      return (
+                        <button
+                          key={amenityOption}
+                          type="button"
+                          onClick={() => {
+                            setFormData(prev => ({
+                              ...prev,
+                              amenities: prev.amenities.includes(amenityOption)
+                                ? prev.amenities.filter(a => a !== amenityOption)
+                                : [...prev.amenities, amenityOption]
+                            }));
+                          }}
+                          className={cn(
+                            "flex items-center gap-2 p-2.5 border-2 text-[10px] font-black uppercase text-left transition-all",
+                            isChecked 
+                              ? "bg-brand-black text-white border-brand-black" 
+                              : "bg-zinc-50 text-zinc-600 border-zinc-200 hover:border-brand-black"
+                          )}
+                        >
+                          <div className={cn(
+                            "w-4 h-4 border flex items-center justify-center text-[9px]",
+                            isChecked ? "bg-brand-teal text-brand-black border-brand-teal" : "border-zinc-400 bg-white"
+                          )}>
+                            {isChecked && "✓"}
+                          </div>
+                          <span className="truncate">{amenityOption}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-4 mt-8 pt-4 border-t-2 border-brand-black/5">
+              <button 
+                onClick={handlePrev} 
+                className="brutalist-button-gray flex-1 group"
+              >
+                <ArrowLeft size={16} className="group-hover:-translate-x-1 transition-transform" />
+                Back
+              </button>
+              <button 
+                onClick={handleNext} 
+                disabled={
+                  !formData.listingType ||
+                  !formData.propertySubType ||
+                  !formData.sizeSqm ||
+                  (formData.propertySubType !== 'Land' && Number(formData.bedrooms || 0) < 0) ||
+                  (formData.propertySubType !== 'Land' && Number(formData.bathrooms || 0) < 0) ||
+                  !formData.estateName ||
+                  formData.amenities.length === 0
+                }
+                className="brutalist-button-black flex-[2] disabled:opacity-50 group"
+              >
+                Continue specifications
+                <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+
+        {step === 3 && (
+          <motion.div 
+            key="step3-specifics"
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -20 }}
@@ -1152,7 +1510,7 @@ export default function ListingForm() {
               </button>
               <button 
                 onClick={handleNext} 
-                disabled={!formData.title || !formData.price || !formData.state || !formData.lga || !formData.googlePinLink}
+                disabled={!formData.state || !formData.lga || !formData.address || !formData.googlePinLink}
                 className="brutalist-button-black flex-[2] disabled:opacity-50 group"
               >
                 Continue Verification
@@ -1162,7 +1520,7 @@ export default function ListingForm() {
           </motion.div>
         )}
 
-        {step === 3 && (
+        {step === 4 && (
           <motion.div 
             key="step3"
             initial={{ opacity: 0, x: 20 }}
@@ -1183,7 +1541,7 @@ export default function ListingForm() {
                 {[
                   {
                     text: "Title Document — upload C of O, R of O, or equivalent",
-                    met: !!formData.listingRequirements.titleDocumentFileName
+                    met: !!formData.titleDocumentFile
                   },
                   {
                     text: "Property Photos — minimum 3 photos required",
@@ -1225,36 +1583,78 @@ export default function ListingForm() {
                   Certificate of Occupancy, Right of Occupancy, Deed of Assignment, or equivalent
                 </span>
               </label>
-              <div className="flex items-center gap-4">
-                <label className={cn(
-                  "flex-1 border-2 border-dashed p-4 flex flex-col items-center justify-center cursor-pointer transition-colors select-none",
-                  formData.listingRequirements.titleDocumentFileName 
-                    ? "bg-brand-teal/5 border-brand-teal" 
-                    : "bg-white dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                )}>
-                  <input 
-                    type="file" 
-                    className="hidden" 
-                    accept=".jpg,.jpeg,.png,.pdf" 
-                    onChange={handleTitleDocUpload} 
-                  />
-                  {formData.listingRequirements.titleDocumentFileName ? (
-                    <div className="text-center font-semibold text-xs">
-                      <span className="text-brand-teal font-black block mb-1">✓ TITLE UPLOADED</span>
-                      <span className="text-zinc-600 dark:text-zinc-300 block break-all font-mono">
-                        {formData.listingRequirements.titleDocumentFileName}
-                      </span>
-                      <span className="mt-1 inline-block bg-brand-teal text-brand-black text-[9px] font-black uppercase px-2 py-0.5">
-                        {formData.listingRequirements.titleDocumentFileType.split('/').pop()?.toUpperCase()}
-                      </span>
+              
+              <div className="space-y-3">
+                {formData.titleDocumentFile ? (
+                  <div className="border-2 border-brand-black dark:border-zinc-700 bg-white dark:bg-zinc-800 p-3 shadow-brutal-sm flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3 overflow-hidden">
+                      <div className="w-10 h-10 bg-brand-teal text-brand-black border-2 border-brand-black flex items-center justify-center shrink-0">
+                        {formData.titleDocumentFile.name.endsWith('.pdf') ? (
+                          <FileText size={20} />
+                        ) : formData.titleDocumentFile.name.endsWith('.docx') ? (
+                          <FileCode size={20} />
+                        ) : (
+                          <Paperclip size={20} />
+                        )}
+                      </div>
+                      <div className="overflow-hidden">
+                        <span className="block text-xs font-black uppercase truncate text-zinc-900 dark:text-zinc-100">
+                          {formData.titleDocumentFile.name}
+                        </span>
+                        <span className="text-[9px] uppercase font-mono text-zinc-400 font-bold block">
+                          {(formData.titleDocumentFile.size / (1024 * 1024)).toFixed(2)} MB
+                        </span>
+                      </div>
                     </div>
-                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleRemoveTitleDoc}
+                      className="w-8 h-8 border-2 border-brand-black hover:bg-red-500 dark:hover:bg-red-600 hover:text-white flex items-center justify-center transition-colors shrink-0"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ) : (
+                  <label className={cn(
+                    "flex border-2 border-dashed p-6 flex-col items-center justify-center cursor-pointer transition-colors select-none",
+                    "bg-white dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700 hover:border-brand-black"
+                  )}>
+                    <input 
+                      type="file" 
+                      className="hidden" 
+                      accept=".jpg,.jpeg,.png,.pdf,.docx" 
+                      onChange={handleTitleDocUpload} 
+                    />
                     <div className="text-center">
-                      <span className="text-brand-teal text-xs font-black block uppercase">SELECT FILE</span>
-                      <span className="text-[10px] text-zinc-400 font-medium uppercase mt-0.5 block">JPG, PNG, PDF only</span>
+                      <Paperclip className="mx-auto text-brand-teal mb-2" size={24} />
+                      <span className="text-brand-teal text-xs font-black block uppercase">SELECT DOCUMENT</span>
+                      <span className="text-[10px] text-zinc-400 font-medium uppercase mt-1 block">PDF, JPG, PNG, DOCX (Max 10MB)</span>
                     </div>
-                  )}
-                </label>
+                  </label>
+                )}
+
+                {/* Upload Thin Teal Progress Bar */}
+                {formData.titleDocumentFile && uploadProgress !== null && uploadProgress > 0 && (
+                  <div className="w-full mt-2">
+                    <div className="h-1.5 w-full bg-zinc-200 dark:bg-zinc-800 border-2 border-brand-black dark:border-zinc-700 overflow-hidden relative">
+                      <div 
+                        className="h-full bg-brand-teal transition-all duration-300" 
+                        style={{ width: `${uploadProgress}%` }}
+                      />
+                    </div>
+                    <span className="text-[9px] font-black uppercase text-brand-teal tracking-widest mt-1 block">
+                      Uploading Progress: {uploadProgress}%
+                    </span>
+                  </div>
+                )}
+
+                {/* Inline Validation & Upload Errors */}
+                {(fileError || uploadError) && (
+                  <div className="flex items-center gap-2 p-3 bg-red-100 dark:bg-red-950/40 border-2 border-red-500 text-red-600 dark:text-red-400 font-mono text-[10px] uppercase font-extrabold mt-2">
+                    <ShieldAlert size={14} className="shrink-0" />
+                    <span>{fileError || uploadError}</span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1620,9 +2020,9 @@ export default function ListingForm() {
           </motion.div>
         )}
 
-        {step === 4 && (
+        {step === 5 && (
           <motion.div 
-            key="step4"
+            key="step5"
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -20 }}

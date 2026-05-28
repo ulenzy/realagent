@@ -91,12 +91,24 @@ export default function App() {
     const newRequest: ListingRequest = {
       ...request,
       commission: PLATFORM_COMMISSION_RATE,
-      id: `req-${Date.now()}`,
+      id: (request as any).id || `req-${Date.now()}`,
       status: 'Agent Bidding',
       submittedAt: new Date().toISOString(),
       lastUpdated: new Date().toISOString(),
       expiresAt: new Date(Date.now() + 30 * 86400000).toISOString(),
-      metrics: { views: 0, saves: 0, inquiries: 0 }
+      metrics: { views: 0, saves: 0, inquiries: 0 },
+      listingType: request.listingType,
+      propertySubType: request.propertySubType,
+      sizeSqm: request.sizeSqm,
+      bedrooms: request.bedrooms,
+      bathrooms: request.bathrooms,
+      estateName: request.estateName,
+      amenities: request.amenities,
+      listingFeeStatus: request.listingFeeStatus || 'Unpaid',
+      listingFeePaidAt: request.listingFeePaidAt || '',
+      dealStatus: request.dealStatus || 'Open',
+      bidWindowOpensAt: request.bidWindowOpensAt || '',
+      bidWindowExpiresAt: request.bidWindowExpiresAt || ''
     };
     addListingRequest(newRequest);
   };

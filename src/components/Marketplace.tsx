@@ -86,10 +86,7 @@ export default function Marketplace() {
       return () => window.removeEventListener('local_guest_properties_updated', loadLocalProps);
     }
 
-    const q = query(
-      collection(db, 'properties'),
-      where('isPromotedProperty', '==', true)
-    );
+    const q = collection(db, 'properties');
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const nowStr = new Date().toISOString();

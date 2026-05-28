@@ -96,6 +96,7 @@ export interface Property {
   commission?: number; // percentage
   acceptsDownPayment?: boolean;
   listingRequirements?: ListingRequirements;
+  listingRequestId?: string;
 }
 
 export type ListingStatus = 'Pending' | 'Agent Bidding' | 'Inspection Scheduled' | 'Under Review' | 'Approved' | 'Rejected' | 'Archived';
@@ -103,6 +104,7 @@ export type ListingStatus = 'Pending' | 'Agent Bidding' | 'Inspection Scheduled'
 export interface ListingRequirements {
   titleDocumentFileName: string;       // filename of uploaded title document
   titleDocumentFileType: string;       // mime type of uploaded file
+  titleDocumentUrl?: string;           // download URL from Firebase Storage
   physicalConditionDescription: string; // min 100 chars — seller's own description
   photos: string[];                    // min 3 photo filenames/URLs
   locationPin: string;                 // Google Maps pin link — required
@@ -151,6 +153,18 @@ export interface ListingRequest {
   assignedAgentTier?: AgentTier;
   listingRequirements: ListingRequirements;
   agentBids?: AgentBid[];
+  listingType: 'Sale' | 'Rent';
+  propertySubType: string;
+  sizeSqm: number;
+  bedrooms: number;
+  bathrooms: number;
+  estateName: string;
+  amenities: string[];
+  listingFeeStatus: 'Unpaid' | 'Paid' | 'Waived';
+  listingFeePaidAt?: string;
+  dealStatus: 'Open' | 'Inspection Paid' | 'Under Offer' | 'Closed' | 'Disputed';
+  bidWindowOpensAt?: string;
+  bidWindowExpiresAt?: string;
 }
 
 export interface Message {

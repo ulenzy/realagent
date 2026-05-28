@@ -15,8 +15,16 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && getUserData().role == 'Admin';
+    }
+
+    function isAgent() {
+      return isSignedIn() && getUserData().role == 'Agent';
     }
 
     function incoming() {
@@ -29,71 +37,41 @@ service cloud.firestore {
 
     // --- User Profiles ---
     match /users/{userId} {
-      function isValidUser(data) {
-        return data.keys().hasAll(['id', 'email', 'name']) 
-               && data.id == request.auth.uid
-               && data.email is string && data.email.size() <= 256
-               && data.name is string && data.name.size() <= 100;
-      }
-
-      allow get: if isOwner(userId);
-      allow list: if isSignedIn() && resource.data.name != null; // Added to allow name checks query
-      allow create: if isSignedIn() && isValidId(userId) && isOwner(userId) && isValidUser(incoming());
-      allow update: if isOwner(userId) && isValidUser(incoming())
-                      && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'firstName', 'lastName', 'phoneNumber', 'isAgent', 'role', 'savedProperties', 'tokens', 'bio', 'avatarSeed', 'avatarUrl', 'avatarTier', 'avatarOptions', 'profileScore', 'rating', 'totalReviews', 'preferredLocations', 'gender', 'linkedin', 'onlineHours', 'specializationArea', 'isSubscriber', 'kycStatus', 'kycDocuments', 'isGuest', 'avatarRolls', 'transactions', 'onboardingCompleted']);
-      allow delete: if isOwner(userId);
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isOwner(userId) || isAdmin();
     }
 
-    // --- Property Listings & Promoted Properties ---
-    match /properties/{propertyId} {
-      function getUserData() {
-        return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-      }
-
-      function isPromoted(data) {
-        return data.get('isPromotedProperty', false) == true;
-      }
-
-      function isValidProperty(data, originalOwnerId) {
-        return data.keys().hasAll(['id', 'ownerId', 'title', 'price'])
-               && data.ownerId == originalOwnerId
-               && data.title is string && data.title.size() <= 200
-               && data.price is number && data.price >= 0;
-      }
-
-      function isValidPromotedProperty(data) {
-        return isPromoted(data)
-               && data.title is string && data.title.size() <= 200
-               && data.price is number && data.price >= 0;
-      }
-
-      // Allow reads on promoted properties publicly, and on listing requests only for owners or agents
-      allow list, get: if (resource != null && resource.data != null && isPromoted(resource.data)) || (isSignedIn() && (
-        resource.data.get('ownerId', '') == request.auth.uid || 
-        getUserData().role == 'Agent'
+    // --- Listing Requests (Pipeline) ---
+    match /listingRequests/{requestId} {
+      allow read: if isAdmin() || (isSignedIn() && (
+        existing().get('ownerId', '') == request.auth.uid ||
+        (isAgent() && existing().status == 'Agent Bidding')
       ));
-      
-      allow create: if isSignedIn() && (
-        (isPromoted(incoming()) && isValidPromotedProperty(incoming())) ||
-        (isValidId(propertyId) && isValidProperty(incoming(), request.auth.uid))
+
+      allow create: if isAdmin() || (isSignedIn() && request.auth.uid == incoming().ownerId);
+
+      allow update: if isAdmin() || (
+        isSignedIn() && (
+          // Case 1: Owner updates specific fields only
+          (isOwner(existing().get('ownerId', '')) && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'type', 'price', 'location', 'listingRequirements'])) ||
+          // Case 2: Agent updates agentBids via arrayUnion only (cannot overwrite elements)
+          (isAgent() && incoming().diff(existing()).affectedKeys().hasOnly(['agentBids']) && incoming().get('agentBids', []).hasAll(existing().get('agentBids', [])))
+        )
       );
 
-      allow update: if isSignedIn() && (
-        // Case 1: Promoted property update by owner or agent
-        (isPromoted(existing()) && (
-          existing().get('ownerId', '') == request.auth.uid ||
-          getUserData().role == 'Agent'
-        )) ||
-        // Case 2: Owner total update for listing request
-        (isOwner(existing().get('ownerId', '')) && isValidProperty(incoming(), request.auth.uid) 
-         && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'price', 'type', 'estateName', 'location', 'image', 'status', 'description', 'commission', 'acceptsDownPayment', 'documents', 'googlePinLink', 'metrics', 'trustScore', 'assignedAgentId', 'assignedAgentTier', 'listingRequirements', 'agentBids', 'lastUpdated'])) ||
-        // Case 3: Agent place bid on listing request
-        (getUserData().role == 'Agent' && existing().status == 'Agent Bidding' 
-         && incoming().diff(existing()).affectedKeys().hasOnly(['agentBids', 'lastUpdated']) 
-         && isValidProperty(incoming(), existing().get('ownerId', '')))
-      );
+      allow delete: if isAdmin() || (isSignedIn() && isOwner(existing().get('ownerId', '')));
+    }
 
-      allow delete: if isSignedIn() && isOwner(existing().get('ownerId', ''));
+    // --- Marketplace Properties ---
+    match /properties/{propertyId} {
+      allow read: if isSignedIn();
+      allow write: if false; // Only Cloud Functions (Admin SDK) can write
+    }
+
+    // --- Transactions Subcollection ---
+    match /users/{userId}/transactions/{transactionId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isAdmin(); // Only Cloud Functions/Admin SDK can write
     }
   }
 }

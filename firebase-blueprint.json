@@ -36,9 +36,9 @@
       },
       "required": ["id", "email", "name"]
     },
-    "Property": {
-      "title": "Property",
-      "description": "Real estate listing",
+    "ListingRequest": {
+      "title": "ListingRequest",
+      "description": "Property listing request in verification pipeline",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
@@ -46,13 +46,35 @@
         "title": { "type": "string" },
         "price": { "type": "number" },
         "type": { "type": "string" },
+        "location": { "type": "string" },
+        "status": { "type": "string" },
+        "submittedAt": { "type": "string", "format": "date-time" },
+        "lastUpdated": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "title", "price"]
+    },
+    "Property": {
+      "title": "Property",
+      "description": "Real estate listing on the live marketplace",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "listingRequestId": { "type": "string" },
+        "title": { "type": "string" },
+        "type": { "type": "string" },
+        "price": { "type": "number" },
+        "sizeSqm": { "type": "number" },
+        "bedrooms": { "type": "number" },
+        "bathrooms": { "type": "number" },
         "estateName": { "type": "string" },
         "location": { "type": "object" },
         "image": { "type": "string" },
-        "status": { "type": "string" },
+        "gallery": { "type": "array" },
+        "agent": { "type": "object" },
+        "expiresAt": { "type": "string", "format": "date-time" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["id", "ownerId", "title", "price"]
+      "required": ["id", "title", "price"]
     }
   },
   "firestore": {
@@ -60,9 +82,13 @@
       "schema": "User",
       "description": "Authenticated user profiles"
     },
+    "listingRequests/{requestId}": {
+      "schema": "ListingRequest",
+      "description": "Listing requests in pipeline and agent bidding"
+    },
     "properties/{propertyId}": {
       "schema": "Property",
-      "description": "Marketplace property listings"
+      "description": "Marketplace live property listings"
     }
   }
 }
