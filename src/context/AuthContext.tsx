@@ -56,6 +56,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const cachedUser = localStorage.getItem('localGuestUser');
       if (cachedUser) {
         const parsed = JSON.parse(cachedUser);
+        const isTargetAdmin = 
+          parsed.email === 'uojemeni15@gmail.com' || 
+          (parsed.name && parsed.name.toUpperCase().includes('LENZY'));
+        if (isTargetAdmin && parsed.role !== 'Admin') {
+          parsed.role = 'Admin';
+          localStorage.setItem('localGuestUser', JSON.stringify(parsed));
+        }
         setUser(parsed);
         setSavedProperties(parsed.savedProperties || []);
       } else {
@@ -104,8 +111,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         unsubscribeUserRef.current = onSnapshot(userDocRef, (docSnap) => {
           if (docSnap.exists()) {
             const userData = docSnap.data() as User;
-            setUser(userData);
-            setSavedProperties(userData.savedProperties || []);
+            const updatedUserData = { ...userData };
+            let needsDbUpdate = false;
+
+            const isTargetAdmin = 
+              userData.email === 'uojemeni15@gmail.com' || 
+              (userData.name && userData.name.toUpperCase().includes('LENZY'));
+
+            if (isTargetAdmin && userData.role !== 'Admin') {
+              updatedUserData.role = 'Admin';
+              needsDbUpdate = true;
+            }
+
+            setUser(updatedUserData);
+            setSavedProperties(updatedUserData.savedProperties || []);
+
+            if (needsDbUpdate) {
+              updateDoc(userDocRef, { role: 'Admin' }).catch(err => 
+                console.error("Auto-assign Admin role error on Firestore:", err)
+              );
+            }
 
             if (userData.accountStatus === 'Suspended' || userData.accountStatus === 'Banned') {
               setTimeout(() => {
@@ -188,6 +213,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const nameParts = (fUser.displayName || '').trim().split(/\s+/);
             const firstName = nameParts[0] || '';
             const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
+            const isTargetAdmin = 
+              (fUser.email || '').toLowerCase() === 'uojemeni15@gmail.com' || 
+              (fUser.displayName || '').toUpperCase().includes('LENZY');
             const newUser: User = {
               id: fUser.uid,
               name: fUser.displayName || '',
@@ -202,7 +230,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               profileScore: 0,
               tokens: 100, // Initial tokens
               savedProperties: [],
-              role: 'Buyer',
+              role: isTargetAdmin ? 'Admin' : 'Buyer',
               onboardingCompleted: false,
             } as any;
             setDoc(userDocRef, newUser);
