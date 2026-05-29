@@ -10,11 +10,12 @@
 
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Home, Search, FileText, Zap, MessageCircle, Moon, Sun, Gavel, Heart, Store, Sparkles, LayoutDashboard, Plus, ShieldAlert, Info, Settings } from 'lucide-react';
+import { Home, Search, FileText, Zap, MessageCircle, Moon, Sun, Gavel, Heart, Store, Sparkles, LayoutDashboard, Plus, ShieldAlert, Info, Settings, Bell } from 'lucide-react';
 import { cn } from './lib/utils';
 import { mockProperties } from './data/mockListings';
 import { ListingRequest, Property } from './types';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, updateDoc } from 'firebase/firestore';
+import { NotificationDrawer } from './components/NotificationDrawer';
 import { db } from './lib/firebase';
 import Marketplace from './components/Marketplace';
 import AISearch from './components/AISearch';
@@ -25,6 +26,7 @@ import ListPropertyFlow from './components/ListPropertyFlow';
 import Messaging from './components/Messaging';
 import Login from './components/Login';
 import Onboarding from './components/Onboarding';
+import PhoneVerification from './components/PhoneVerification';
 import logoImage from './assets/images/logo.png';
 import { useAuth } from './context/AuthContext';
 import { useNavigation } from './context/NavigationContext';
@@ -60,6 +62,111 @@ export default function App() {
 
   const [showWelcomeToast, setShowWelcomeToast] = React.useState(false);
   const toastActionDone = React.useRef(false);
+
+  // Notifications
+  const [notifications, setNotifications] = React.useState<any[]>([]);
+  const [isNotificationOpen, setIsNotificationOpen] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!user) {
+      setNotifications([]);
+      return;
+    }
+
+    const isLocalGuest = localStorage.getItem('isLocalGuest') === 'true';
+
+    if (isLocalGuest) {
+      const handleLocalUpdate = () => {
+        const stored = localStorage.getItem(`notifications_${user.id}`);
+        if (stored) {
+          try {
+            setNotifications(JSON.parse(stored));
+          } catch (e) {
+            setNotifications([]);
+          }
+        } else {
+          setNotifications([]);
+        }
+      };
+      
+      handleLocalUpdate();
+      
+      window.addEventListener('storage', handleLocalUpdate);
+      const interval = setInterval(handleLocalUpdate, 1500);
+      return () => {
+        window.removeEventListener('storage', handleLocalUpdate);
+        clearInterval(interval);
+      };
+    }
+
+    // Live Snapshot from Firestore
+    const q = collection(db, 'users', user.id, 'notifications');
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list: any[] = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        list.push({
+          id: doc.id,
+          title: data.title || '',
+          body: data.body || '',
+          type: data.type || '',
+          data: data.data || {},
+          read: !!data.read,
+          createdAt: data.createdAt || ''
+        });
+      });
+      list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      setNotifications(list);
+    }, (error) => {
+      console.error("Notifications listener error:", error);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  const handleMarkAsRead = async (notifId: string) => {
+    if (!user) return;
+    const isLocalGuest = localStorage.getItem('isLocalGuest') === 'true';
+
+    if (isLocalGuest) {
+      const key = `notifications_${user.id}`;
+      const updated = notifications.map(n => n.id === notifId ? { ...n, read: true } : n);
+      setNotifications(updated);
+      localStorage.setItem(key, JSON.stringify(updated));
+    } else {
+      try {
+        await updateDoc(doc(db, 'users', user.id, 'notifications', notifId), { read: true });
+      } catch (err) {
+        console.error("Mark read error:", err);
+      }
+    }
+  };
+
+  const handleMarkAllAsRead = async () => {
+    if (!user) return;
+    const isLocalGuest = localStorage.getItem('isLocalGuest') === 'true';
+
+    if (isLocalGuest) {
+      const key = `notifications_${user.id}`;
+      const updated = notifications.map(n => ({ ...n, read: true }));
+      setNotifications(updated);
+      localStorage.setItem(key, JSON.stringify(updated));
+    } else {
+      const unreads = notifications.filter(n => !n.read);
+      for (const n of unreads) {
+        try {
+          await updateDoc(doc(db, 'users', user.id, 'notifications', n.id), { read: true });
+        } catch (err) {
+          console.error("Mark all read error:", err);
+        }
+      }
+    }
+  };
+
+  const handleNavigateToProperty = (listingId: string) => {
+    setSelectedPropertyId(listingId);
+    setActiveTab('marketplace');
+  };
 
   React.useEffect(() => {
     if (user && user.onboardingCompleted && user.kycStatus === 'None' && !user.welcomeToastShown && !toastActionDone.current) {
@@ -193,6 +300,12 @@ export default function App() {
     return <Login />;
   }
 
+  const isSignUpFlow = sessionStorage.getItem('isSignUpFlow') === 'true';
+
+  if (!user.phoneVerified && isSignUpFlow) {
+    return <PhoneVerification />;
+  }
+
   if (!user.onboardingCompleted) {
     return <Onboarding />;
   }
@@ -284,13 +397,6 @@ export default function App() {
         </div>
         <div className="flex gap-4">
           <button
-            onClick={toggleDarkMode}
-            className="p-2 border-2 border-brand-black bg-white dark:bg-zinc-900 shadow-brutal-sm hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all flex items-center justify-center rounded-full dark:border-zinc-700 dark:shadow-[2px_2px_0px_0px_#52525b]"
-            aria-label="Toggle Dark Mode"
-          >
-            {isDarkMode ? <Sun className="w-5 h-5 text-brand-gray" /> : <Moon className="w-5 h-5 text-brand-black fill-brand-black" />}
-          </button>
-          <button
             onClick={() => openChat()}
             className="p-2 border-2 border-brand-black bg-white dark:bg-zinc-900 shadow-brutal-sm hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all flex items-center justify-center rounded-full dark:border-zinc-700 dark:shadow-[2px_2px_0px_0px_#52525b] relative"
             aria-label="Messages"
@@ -298,6 +404,22 @@ export default function App() {
             <MessageCircle className="w-5 h-5 text-brand-black dark:text-white" />
             <span className="absolute -top-1 -right-1 w-4 h-4 bg-brand-red text-white text-[8px] font-black flex items-center justify-center rounded-full border border-brand-black">2</span>
           </button>
+          
+          {user && (
+            <button
+              onClick={() => setIsNotificationOpen(true)}
+              className="p-2 border-2 border-brand-black bg-white dark:bg-zinc-900 shadow-brutal-sm hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all flex items-center justify-center rounded-full dark:border-zinc-700 dark:shadow-[2px_2px_0px_0px_#52525b] relative"
+              aria-label="Notifications"
+              id="notification-bell-btn"
+            >
+              <Bell className="w-5 h-5 text-brand-black dark:text-white" />
+              {notifications.filter(n => !n.read).length > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 bg-brand-teal text-brand-black text-[8px] font-black flex items-center justify-center rounded-full border border-brand-black animate-pulse">
+                  {notifications.filter(n => !n.read).length}
+                </span>
+              )}
+            </button>
+          )}
           <button 
             onClick={() => { setActiveTab('profile'); handleBackToMarketplace(); }}
             className={cn(
@@ -432,6 +554,19 @@ export default function App() {
           </div>
         </nav>
       )}
+
+      <AnimatePresence>
+        {isNotificationOpen && (
+          <NotificationDrawer
+            isOpen={isNotificationOpen}
+            onClose={() => setIsNotificationOpen(false)}
+            notifications={notifications}
+            onMarkAsRead={handleMarkAsRead}
+            onMarkAllAsRead={handleMarkAllAsRead}
+            onNavigateToProperty={handleNavigateToProperty}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

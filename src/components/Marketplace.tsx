@@ -13,6 +13,8 @@ import { cn, formatCurrency, formatNumber, formatNumberString, parseFormattedNum
 import { ROILevel, Property } from '../types';
 import Slider from 'rc-slider';
 import 'rc-slider/assets/index.css';
+import { LayoutGrid, Map as MapIcon } from 'lucide-react';
+import InteractiveMap from './InteractiveMap';
 
 type SortOption = 'recommended' | 'newest' | 'price-low' | 'price-high' | 'appreciation' | 'yield';
 
@@ -56,9 +58,11 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigation } from '../context/NavigationContext';
 
 export default function Marketplace() {
-  const { savedProperties, toggleSavedProperty: onToggleSave, isLocalGuest } = useAuth();
+  const { user, savedProperties, toggleSavedProperty: onToggleSave, isLocalGuest } = useAuth();
   const { handleSelectProperty: onSelectProperty, setSelectedAgentId: onViewAgentProfile } = useNavigation();
 
+  const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
+  const [hasInitializedPrefs, setHasInitializedPrefs] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchSuggestions, setShowSearchSuggestions] = useState(false);
   const [recentSearches, setRecentSearches] = useState<string[]>(['Guzape', 'Land in Jahi', 'Duplex under 200M']);
@@ -70,6 +74,20 @@ export default function Marketplace() {
   const searchRef = useRef<HTMLDivElement>(null);
 
   const [liveProperties, setLiveProperties] = useState<Property[]>([]);
+
+  useEffect(() => {
+    if (user && !hasInitializedPrefs) {
+      if (user.preferences?.defaultSearchView) {
+        setViewMode(user.preferences.defaultSearchView);
+      }
+      if (user.preferences?.defaultListingType) {
+        const prefType = user.preferences.defaultListingType;
+        const initialListingType = prefType === 'All' ? 'any' : prefType;
+        setFilters(f => ({ ...f, listingType: initialListingType as any }));
+      }
+      setHasInitializedPrefs(true);
+    }
+  }, [user, hasInitializedPrefs]);
 
   useEffect(() => {
     if (isLocalGuest) {
@@ -338,7 +356,36 @@ export default function Marketplace() {
            <span className="text-[10px] font-black uppercase text-zinc-400 tracking-tighter mt-2">Inventory Items Available</span>
         </div>
         
-        <div className="relative group">
+        <div className="flex items-center gap-2">
+          {/* View Toggle */}
+          <div className="flex border-2 border-brand-black dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-brutal-sm dark:shadow-[2px_2px_0px_0px_#52525b] overflow-hidden rounded-md">
+            <button
+              onClick={() => setViewMode('list')}
+              className={cn(
+                "px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-colors flex items-center gap-1",
+                viewMode === 'list' 
+                  ? "bg-brand-teal text-brand-black" 
+                  : "bg-transparent text-zinc-500 hover:text-brand-black dark:hover:text-white"
+              )}
+            >
+              <LayoutGrid size={12} />
+              List
+            </button>
+            <button
+              onClick={() => setViewMode('map')}
+              className={cn(
+                "px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-colors flex items-center gap-1 border-l-2 border-brand-black dark:border-zinc-700",
+                viewMode === 'map' 
+                  ? "bg-brand-teal text-brand-black" 
+                  : "bg-transparent text-zinc-500 hover:text-brand-black dark:hover:text-white"
+              )}
+            >
+              <MapIcon size={12} />
+              Map
+            </button>
+          </div>
+
+          <div className="relative group">
           <button className="flex items-center gap-2 bg-white dark:bg-zinc-900 border-2 border-brand-black dark:border-zinc-700 px-3 py-2 text-[10px] font-black uppercase tracking-widest shadow-brutal-sm dark:shadow-[2px_2px_0px_0px_#52525b]">
             <ArrowDownWideNarrow size={14} className="text-brand-teal" />
             Sort: {activeSort.replace('-', ' ')}
@@ -367,49 +414,72 @@ export default function Marketplace() {
              ))}
           </div>
         </div>
+        </div>
       </section>
 
-      {/* Property Grid */}
-      <section className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        <AnimatePresence mode="popLayout">
+      {/* Property Grid / Map View */}
+      {viewMode === 'map' ? (
+        <section className="h-[600px] border-4 border-brand-black dark:border-zinc-700 shadow-aggressive dark:shadow-[6px_6px_0px_0px_#52525b] overflow-hidden bg-white dark:bg-zinc-900">
           {filteredProperties.length > 0 ? (
-            filteredProperties.map(property => (
-              <motion.div
-                key={property.id}
-                layout
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.9 }}
-                transition={{ type: 'spring', stiffness: 450, damping: 35 }}
-              >
-                <PropertyCard 
-                  property={property} 
-                  onViewDetails={() => onSelectProperty(property.id)} 
-                  onViewAgentProfile={() => onViewAgentProfile(property.agent.id)}
-                  isSaved={savedProperties.includes(property.id)}
-                  onToggleSave={onToggleSave}
-                />
-              </motion.div>
-            ))
+            <InteractiveMap 
+              mainProperty={filteredProperties[0]}
+              nearbyProperties={filteredProperties.slice(1)}
+              onPropertyClick={(id) => onSelectProperty(id)}
+            />
           ) : (
-            <div className="col-span-full py-20 flex flex-col items-center gap-4 text-center">
-              <div className="w-20 h-20 bg-brand-gray dark:bg-zinc-800 border-4 border-brand-black dark:border-zinc-700 flex items-center justify-center rounded-full">
+            <div className="w-full h-full bg-brand-gray dark:bg-zinc-800 flex flex-col items-center justify-center p-8 text-center gap-4">
+              <div className="w-20 h-20 bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 flex items-center justify-center rounded-full">
                 <Search size={40} className="text-zinc-400" />
               </div>
               <div>
-                <h3 className="text-xl font-display font-black uppercase">No Intel Matches</h3>
-                <p className="text-zinc-500 font-bold uppercase text-xs">Try recalibrating your search parameters</p>
+                <h3 className="text-xl font-display font-black uppercase">No Matching Coordinates</h3>
+                <p className="text-zinc-500 font-bold uppercase text-xs">No properties match your active search filters</p>
               </div>
-              <button 
-                onClick={() => { setFilters(INITIAL_FILTERS); setSearchQuery(''); setSelectedQuickFilters([]); }}
-                className="mt-4 px-6 py-2 bg-brand-black text-brand-teal font-display font-black uppercase text-sm border-2 border-brand-black shadow-aggressive"
-              >
-                Reset System
-              </button>
             </div>
           )}
-        </AnimatePresence>
-      </section>
+        </section>
+      ) : (
+        <section className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <AnimatePresence mode="popLayout">
+            {filteredProperties.length > 0 ? (
+              filteredProperties.map(property => (
+                <motion.div
+                  key={property.id}
+                  layout
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  transition={{ type: 'spring', stiffness: 450, damping: 35 }}
+                >
+                  <PropertyCard 
+                    property={property} 
+                    onViewDetails={() => onSelectProperty(property.id)} 
+                    onViewAgentProfile={() => onViewAgentProfile(property.agent.id)}
+                    isSaved={savedProperties.includes(property.id)}
+                    onToggleSave={onToggleSave}
+                  />
+                </motion.div>
+              ))
+            ) : (
+              <div className="col-span-full py-20 flex flex-col items-center gap-4 text-center">
+                <div className="w-20 h-20 bg-brand-gray dark:bg-zinc-800 border-4 border-brand-black dark:border-zinc-700 flex items-center justify-center rounded-full">
+                  <Search size={40} className="text-zinc-400" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-display font-black uppercase">No Intel Matches</h3>
+                  <p className="text-zinc-500 font-bold uppercase text-xs">Try recalibrating your search parameters</p>
+                </div>
+                <button 
+                  onClick={() => { setFilters(INITIAL_FILTERS); setSearchQuery(''); setSelectedQuickFilters([]); }}
+                  className="mt-4 px-6 py-2 bg-brand-black text-brand-teal font-display font-black uppercase text-sm border-2 border-brand-black shadow-aggressive"
+                >
+                  Reset System
+                </button>
+              </div>
+            )}
+          </AnimatePresence>
+        </section>
+      )}
 
       {/* Floating Filter Panel (Overlay) */}
       <AnimatePresence>
@@ -733,14 +803,15 @@ export const PropertyCard: React.FC<{
   isSaved?: boolean; 
   onToggleSave?: (id: string) => void; 
 }> = ({ property, onViewDetails, onViewAgentProfile, isSaved, onToggleSave }) => {
+  const { user } = useAuth();
   const pricePerSqm = property.price / property.sizeSqm;
 
   return (
     <div className={cn(
       "overflow-hidden group bg-white dark:bg-zinc-900 border-4 transition-all hover:-translate-x-0.5 hover:-translate-y-0.5 shadow-aggressive",
       property.isSubscriber 
-        ? "border-emerald-500 dark:border-emerald-600 shadow-[6px_6px_0px_0px_#10b981] hover:shadow-[10px_10px_0px_0px_#10b981]" 
-        : "border-brand-red dark:border-red-600 shadow-[6px_6px_0px_0px_#FF3B30] hover:shadow-[10px_10px_0px_0px_#FF3B30]"
+        ? "border-amber-400 dark:border-amber-500 shadow-[6px_6px_0px_0px_#fbbf24] hover:shadow-[10px_10px_0px_0px_#fbbf24]" 
+        : "border-emerald-500 dark:border-emerald-600 shadow-[6px_6px_0px_0px_#10b981] hover:shadow-[10px_10px_0px_0px_#10b981]"
     )}>
       {/* Image Container */}
       <div className="relative aspect-[16/10] overflow-hidden border-b-2 border-brand-black cursor-pointer" onClick={onViewDetails}>
@@ -802,7 +873,7 @@ export const PropertyCard: React.FC<{
             5% COMM
           </div>
           <div className="bg-brand-black text-brand-teal px-4 py-2 border-l-4 border-brand-teal font-display font-black text-lg shadow-aggressive">
-            {formatCurrency(property.price)}
+            {formatCurrency(property.price, user?.preferences?.currency)}
           </div>
         </div>
       </div>

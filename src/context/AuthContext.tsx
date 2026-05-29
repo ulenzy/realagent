@@ -6,13 +6,18 @@ import {
   signInAnonymously, 
   signOut, 
   User as FirebaseUser,
-  linkWithPopup
+  linkWithPopup,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  updateProfile
 } from 'firebase/auth';
 import { auth, googleProvider, facebookProvider } from '../lib/firebase';
 import { doc, getDoc, getDocs, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove, collection, query, where, addDoc, Timestamp } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { sendNotification } from '../lib/notifications';
 import { User, ListingRequest, Transaction, Property, ListingType, AgentTier, ROILevel, AreaTrend } from '../types';
 import { TrustScoreEvent, calculateTrustScoreDelta } from '../lib/trustScore';
+import { generateEstateIntelligence } from '../lib/estateIntelligence';
 
 interface AuthContextType {
   user: User | null;
@@ -22,11 +27,13 @@ interface AuthContextType {
   listingRequests: ListingRequest[];
   platformListings: ListingRequest[];
   savedProperties: string[];
+  isLocalGuest: boolean;
   signInWithGoogle: () => Promise<void>;
   signInWithFacebook: () => Promise<void>;
-  signInAsGuest: () => Promise<void>;
-  signInWithGoogleMock: () => void;
-  signInWithFacebookMock: () => void;
+  signInWithEmail: (email: string, pass: string) => Promise<void>;
+  signUpWithEmail: (email: string, pass: string, name: string) => Promise<void>;
+  signInWithGoogleMock: () => Promise<void>;
+  signInWithFacebookMock: () => Promise<void>;
   logout: () => Promise<void>;
   toggleSavedProperty: (id: string) => Promise<void>;
   addListingRequest: (request: ListingRequest) => Promise<void>;
@@ -36,10 +43,25 @@ interface AuthContextType {
   updateAgentTrustScore: (agentId: string, event: TrustScoreEvent) => Promise<void>;
 }
 
+export const DEFAULT_PREFERENCES = {
+  theme: 'system' as const,
+  notifications: {
+    bidReceived: true,
+    listingApproved: true,
+    inspectionConfirmed: true,
+    messageReceived: true,
+    dealStatusUpdate: true,
+    marketingUpdates: true,
+  },
+  language: 'en' as const,
+  currency: 'NGN' as const,
+  defaultSearchView: 'list' as const,
+  defaultListingType: 'All' as const,
+};
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [isLocalGuest, setIsLocalGuest] = useState(() => localStorage.getItem('isLocalGuest') === 'true');
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -52,56 +74,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const unsubscribePlatformListingsRef = React.useRef<(() => void) | null>(null);
 
   useEffect(() => {
-    if (isLocalGuest) {
-      const cachedUser = localStorage.getItem('localGuestUser');
-      if (cachedUser) {
-        const parsed = JSON.parse(cachedUser);
-        const isTargetAdmin = 
-          parsed.email === 'uojemeni15@gmail.com' || 
-          (parsed.name && parsed.name.toUpperCase().includes('LENZY'));
-        if (isTargetAdmin && parsed.role !== 'Admin') {
-          parsed.role = 'Admin';
-          localStorage.setItem('localGuestUser', JSON.stringify(parsed));
-        }
-        setUser(parsed);
-        setSavedProperties(parsed.savedProperties || []);
-      } else {
-        const guestUser: User = {
-          id: 'guest_local_user',
-          name: 'Guest User',
-          firstName: 'Guest',
-          lastName: 'User',
-          email: '',
-          phoneNumber: '',
-          isAgent: false,
-          isSubscriber: false,
-          kycStatus: 'None',
-          kycDocuments: [],
-          profileScore: 0,
-          tokens: 100,
-          savedProperties: [],
-          role: 'Buyer',
-          onboardingCompleted: false,
-          isGuest: true,
-        } as any;
-        setUser(guestUser);
-        setSavedProperties([]);
-        localStorage.setItem('localGuestUser', JSON.stringify(guestUser));
-      }
-      setFirebaseUser({ uid: 'guest_local_user', isAnonymous: true, email: null } as any);
-      const localListings = localStorage.getItem('localGuestListings');
-      if (localListings) {
-        const parsedListings = JSON.parse(localListings);
-        setListingRequests(parsedListings);
-        setPlatformListings(parsedListings.filter((l: any) => l.status === 'Agent Bidding'));
-      } else {
-        setListingRequests([]);
-        setPlatformListings([]);
-      }
-      setLoading(false);
-      return;
-    }
-
     const unsubscribeAuth = onAuthStateChanged(auth, async (fUser) => {
       setFirebaseUser(fUser);
       setError(null);
@@ -167,25 +139,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                   await updateListingRequest(listing.id, { status: 'Inactive', listingFeeStatus: 'Monthly Unpaid' });
                   
                   // update the promoted property document linked to this listingRequestId
-                  if (!isLocalGuest) {
-                    try {
-                      const qProps = query(collection(db, 'properties'), where('listingRequestId', '==', listing.id));
-                      const querySnapshot = await getDocs(qProps);
-                      const promises = querySnapshot.docs.map(docSnap => 
-                        updateDoc(doc(db, 'properties', docSnap.id), { status: 'Inactive' })
-                      );
-                      await Promise.all(promises);
-                    } catch (err) {
-                      console.error("Failed to mark property status as Inactive on Firestore:", err);
-                    }
-                  } else {
-                    const guestProps = localStorage.getItem('localGuestProperties') || '[]';
-                    const parsedProps = JSON.parse(guestProps);
-                    const updatedProps = parsedProps.map((p: any) => 
-                      p.listingRequestId === listing.id ? { ...p, status: 'Inactive' } : p
+                  try {
+                    const qProps = query(collection(db, 'properties'), where('listingRequestId', '==', listing.id));
+                    const querySnapshot = await getDocs(qProps);
+                    const promises = querySnapshot.docs.map(docSnap => 
+                      updateDoc(doc(db, 'properties', docSnap.id), { status: 'Inactive' })
                     );
-                    localStorage.setItem('localGuestProperties', JSON.stringify(updatedProps));
-                    window.dispatchEvent(new Event('local_guest_properties_updated'));
+                    await Promise.all(promises);
+                  } catch (err) {
+                    console.error("Failed to mark property status as Inactive on Firestore:", err);
                   }
                 }
               });
@@ -210,6 +172,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             });
           } else {
             // Initial profile creation
+            sessionStorage.setItem('isSignUpFlow', 'true');
             const nameParts = (fUser.displayName || '').trim().split(/\s+/);
             const firstName = nameParts[0] || '';
             const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
@@ -232,6 +195,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               savedProperties: [],
               role: isTargetAdmin ? 'Admin' : 'Buyer',
               onboardingCompleted: false,
+              phoneVerified: false,
+              preferences: DEFAULT_PREFERENCES,
+              profileVisible: true,
             } as any;
             setDoc(userDocRef, newUser);
           }
@@ -259,37 +225,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (unsubscribeListingsRef.current) unsubscribeListingsRef.current();
       if (unsubscribePlatformListingsRef.current) unsubscribePlatformListingsRef.current();
     };
-  }, [isLocalGuest]);
-
-  const setupLocalGuest = () => {
-    const guestUser: User = {
-      id: 'guest_local_user',
-      name: 'Guest User',
-      firstName: 'Guest',
-      lastName: 'User',
-      email: '',
-      phoneNumber: '',
-      isAgent: false,
-      isSubscriber: false,
-      kycStatus: 'None',
-      kycDocuments: [],
-      profileScore: 0,
-      tokens: 100,
-      savedProperties: [],
-      role: 'Buyer',
-      onboardingCompleted: false,
-      isGuest: true,
-    } as any;
-    setUser(guestUser);
-    setSavedProperties([]);
-    localStorage.setItem('localGuestUser', JSON.stringify(guestUser));
-    setFirebaseUser({ uid: 'guest_local_user', isAnonymous: true, email: null } as any);
-    setListingRequests([]);
-    setPlatformListings([]);
-    setIsLocalGuest(true);
-    localStorage.setItem('isLocalGuest', 'true');
-    setLoading(false);
-  };
+  }, []);
 
   const signInWithGoogle = async () => {
     try {
@@ -303,8 +239,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         error?.code === 'auth/cancelled-popup-request' ||
         error?.message?.includes('cancelled-popup-request')
       ) {
-        console.warn('Google Sign In popup was closed or blocked. Falling back to local Google user.');
-        signInWithGoogleMock();
+        console.warn('Google Sign In popup was closed or blocked. Falling back to Google Mock.');
+        await signInWithGoogleMock();
         return;
       }
       console.error('Google Sign In Error:', error);
@@ -312,33 +248,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const signInWithGoogleMock = () => {
-    const googleUser: User = {
-      id: 'google_local_user',
-      name: 'Google User',
-      firstName: 'Google',
-      lastName: 'User',
-      email: 'user@gmail.com',
-      phoneNumber: '',
-      isAgent: false,
-      isSubscriber: false,
-      kycStatus: 'None',
-      kycDocuments: [],
-      profileScore: 0,
-      tokens: 100,
-      savedProperties: [],
-      role: 'Buyer',
-      onboardingCompleted: false,
-    } as any;
-    setUser(googleUser);
-    setSavedProperties([]);
-    localStorage.setItem('localGuestUser', JSON.stringify(googleUser));
-    setFirebaseUser({ uid: 'google_local_user', isAnonymous: false, email: 'user@gmail.com', displayName: 'Google User' } as any);
-    setListingRequests([]);
-    setPlatformListings([]);
-    setIsLocalGuest(true);
-    localStorage.setItem('isLocalGuest', 'true');
-    setLoading(false);
+  const signInWithGoogleMock = async () => {
+    try {
+      sessionStorage.setItem('isSignUpFlow', 'true');
+      const userCredential = await signInAnonymously(auth);
+      const fUser = userCredential.user;
+      const userDocRef = doc(db, 'users', fUser.uid);
+      const newUser: User = {
+        id: fUser.uid,
+        name: 'Google User',
+        firstName: 'Google',
+        lastName: 'User',
+        email: 'user@gmail.com',
+        phoneNumber: '',
+        isAgent: false,
+        isSubscriber: false,
+        kycStatus: 'None',
+        kycDocuments: [],
+        profileScore: 0,
+        tokens: 100,
+        savedProperties: [],
+        role: 'Buyer',
+        onboardingCompleted: false,
+        phoneVerified: false,
+        preferences: DEFAULT_PREFERENCES,
+        profileVisible: true,
+      } as any;
+      await setDoc(userDocRef, newUser);
+    } catch (err: any) {
+      console.error('Google Mock Sign In Error:', err);
+      setError(err.message);
+    }
   };
 
   const signInWithFacebook = async () => {
@@ -353,8 +293,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         error?.code === 'auth/cancelled-popup-request' ||
         error?.message?.includes('cancelled-popup-request')
       ) {
-        console.warn('Facebook Sign In popup was closed or blocked. Falling back to local Facebook user.');
-        signInWithFacebookMock();
+        console.warn('Facebook Sign In popup was closed or blocked. Falling back to Facebook Mock.');
+        await signInWithFacebookMock();
         return;
       }
       console.error('Facebook Sign In Error:', error);
@@ -362,60 +302,89 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const signInWithFacebookMock = () => {
-    const facebookUser: User = {
-      id: 'facebook_local_user',
-      name: 'Facebook User',
-      firstName: 'Facebook',
-      lastName: 'User',
-      email: 'user@facebook.com',
-      phoneNumber: '',
-      isAgent: false,
-      isSubscriber: false,
-      kycStatus: 'None',
-      kycDocuments: [],
-      profileScore: 0,
-      tokens: 100,
-      savedProperties: [],
-      role: 'Buyer',
-      onboardingCompleted: false,
-    } as any;
-    setUser(facebookUser);
-    setSavedProperties([]);
-    localStorage.setItem('localGuestUser', JSON.stringify(facebookUser));
-    setFirebaseUser({ uid: 'facebook_local_user', isAnonymous: false, email: 'user@facebook.com', displayName: 'Facebook User' } as any);
-    setListingRequests([]);
-    setPlatformListings([]);
-    setIsLocalGuest(true);
-    localStorage.setItem('isLocalGuest', 'true');
-    setLoading(false);
+  const signInWithFacebookMock = async () => {
+    try {
+      sessionStorage.setItem('isSignUpFlow', 'true');
+      const userCredential = await signInAnonymously(auth);
+      const fUser = userCredential.user;
+      const userDocRef = doc(db, 'users', fUser.uid);
+      const newUser: User = {
+        id: fUser.uid,
+        name: 'Facebook User',
+        firstName: 'Facebook',
+        lastName: 'User',
+        email: 'user@facebook.com',
+        phoneNumber: '',
+        isAgent: false,
+        isSubscriber: false,
+        kycStatus: 'None',
+        kycDocuments: [],
+        profileScore: 0,
+        tokens: 100,
+        savedProperties: [],
+        role: 'Buyer',
+        onboardingCompleted: false,
+        phoneVerified: false,
+        preferences: DEFAULT_PREFERENCES,
+        profileVisible: true,
+      } as any;
+      await setDoc(userDocRef, newUser);
+    } catch (err: any) {
+      console.error('Facebook Mock Sign In Error:', err);
+      setError(err.message);
+    }
   };
 
-  const signInAsGuest = async () => {
+  const signInWithEmail = async (email: string, pass: string) => {
     try {
-      await signInAnonymously(auth);
-    } catch (error) {
-      console.warn('Firebase signInAnonymously failed, falling back to local guest session:', error);
-      setupLocalGuest();
+      await signInWithEmailAndPassword(auth, email, pass);
+    } catch (err) {
+      console.error('Email sign in error:', err);
+      throw err;
+    }
+  };
+
+  const signUpWithEmail = async (email: string, pass: string, name: string) => {
+    try {
+      sessionStorage.setItem('isSignUpFlow', 'true');
+      const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
+      const fUser = userCredential.user;
+      await updateProfile(fUser, { displayName: name });
+      
+      const nameParts = name.trim().split(/\s+/);
+      const firstName = nameParts[0] || '';
+      const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
+      
+      const newUser: User = {
+        id: fUser.uid,
+        name: name,
+        firstName: firstName,
+        lastName: lastName,
+        email: email,
+        phoneNumber: '',
+        isAgent: false,
+        isSubscriber: false,
+        kycStatus: 'None',
+        kycDocuments: [],
+        profileScore: 0,
+        tokens: 100,
+        savedProperties: [],
+        role: 'Buyer',
+        onboardingCompleted: false,
+        phoneVerified: false,
+        preferences: DEFAULT_PREFERENCES,
+        profileVisible: true,
+      } as any;
+      
+      await setDoc(doc(db, 'users', fUser.uid), newUser);
+    } catch (err) {
+      console.error('Email sign up error:', err);
+      throw err;
     }
   };
 
   async function logout() {
     try {
-      if (isLocalGuest) {
-        setIsLocalGuest(false);
-        localStorage.removeItem('isLocalGuest');
-        localStorage.removeItem('localGuestUser');
-        localStorage.removeItem('localGuestListings');
-        localStorage.removeItem('localGuestTransactions');
-        setUser(null);
-        setFirebaseUser(null);
-        setListingRequests([]);
-        setPlatformListings([]);
-        setSavedProperties([]);
-        setLoading(false);
-        return;
-      }
       await signOut(auth);
     } catch (error) {
       console.error('Logout Error:', error);
@@ -425,17 +394,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const toggleSavedProperty = async (id: string) => {
     if (!user) return;
-    if (isLocalGuest) {
-      const isSaved = savedProperties.includes(id);
-      const updatedSavedProperties = isSaved 
-        ? savedProperties.filter(savedId => savedId !== id)
-        : [...savedProperties, id];
-      setSavedProperties(updatedSavedProperties);
-      const updatedUser = { ...user, savedProperties: updatedSavedProperties };
-      setUser(updatedUser);
-      localStorage.setItem('localGuestUser', JSON.stringify(updatedUser));
-      return;
-    }
     const userRef = doc(db, 'users', user.id);
     const isSaved = savedProperties.includes(id);
     try {
@@ -449,13 +407,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const addListingRequest = async (request: ListingRequest) => {
     if (!user) return;
-    if (isLocalGuest) {
-      const updatedListings = [...listingRequests, { ...request, ownerId: user.id }];
-      setListingRequests(updatedListings);
-      setPlatformListings(updatedListings.filter(item => item.status === 'Agent Bidding'));
-      localStorage.setItem('localGuestListings', JSON.stringify(updatedListings));
-      return;
-    }
     try {
       await setDoc(doc(db, 'listingRequests', request.id), {
         ...request,
@@ -467,16 +418,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const promoteToProperty = async (listingRequest: ListingRequest) => {
-    // 1. Set dates
     const nowStr = new Date().toISOString();
     const expiresAtStr = new Date(Date.now() + 30 * 86400000).toISOString();
 
-    // 2. Location
     const parts = (listingRequest.location || '').split(',');
     const area = parts[0]?.trim() || '';
     const state = parts[1]?.trim() || '';
 
-    // 3. Fetch agent info if not in guest mode
     let agentObj = {
       id: listingRequest.assignedAgentId || 'a1',
       name: 'Professional Agent',
@@ -490,7 +438,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       agentTier: 'Platform Agent' as AgentTier
     };
 
-    if (listingRequest.assignedAgentId && !isLocalGuest) {
+    if (listingRequest.assignedAgentId) {
       try {
         const agentDoc = await getDoc(doc(db, 'users', listingRequest.assignedAgentId));
         if (agentDoc.exists()) {
@@ -513,20 +461,54 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
 
+    let lat = 9.0765;
+    let lng = 7.3986;
+    const pin = listingRequest.listingRequirements?.locationPin;
+    if (pin) {
+      const coordsMatch = pin.match(/(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/);
+      if (coordsMatch) {
+        lat = parseFloat(coordsMatch[1]);
+        lng = parseFloat(coordsMatch[2]);
+      } else {
+        const parts = pin.split(',');
+        if (parts.length >= 2) {
+          const latVal = parseFloat(parts[0]);
+          const lngVal = parseFloat(parts[1]);
+          if (!isNaN(latVal) && !isNaN(lngVal)) {
+            lat = latVal;
+            lng = lngVal;
+          }
+        }
+      }
+    }
+
+    const marketIntelligence = await generateEstateIntelligence(
+      lat,
+      lng,
+      listingRequest.type || 'House',
+      listingRequest.listingType || 'Sale'
+    );
+
+    const priceNum = listingRequest.price || 0;
+    const computedYield = listingRequest.listingType === 'Rent' 
+      ? parseFloat(((priceNum * 0.08) / 12).toFixed(1))
+      : 7.5;
+
     const newPropertyData = {
       title: listingRequest.title || 'Approved Property',
       type: listingRequest.type || 'House',
-      price: listingRequest.price || 0,
-      listingType: 'Sale' as ListingType,
-      sizeSqm: 850,
-      bedrooms: 5,
-      bathrooms: 6,
-      estateName: 'Golden Gate Estate',
+      price: priceNum,
+      listingType: listingRequest.listingType || ('Sale' as ListingType),
+      sizeSqm: listingRequest.sizeSqm || 850,
+      bedrooms: listingRequest.bedrooms || 5,
+      bathrooms: listingRequest.bathrooms || 6,
+      estateName: listingRequest.estateName || 'Golden Gate Estate',
       location: {
         state: state || 'Lagos',
         city: area || 'Ikeja',
         area: area || 'Ikeja',
-        address: listingRequest.googlePinLink || `${area}, ${state}`
+        address: listingRequest.googlePinLink || `${area}, ${state}`,
+        coordinates: { lat, lng }
       },
       image: '/regenerated_image_1778928319302.png',
       gallery: [
@@ -534,28 +516,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&q=80&w=800'
       ],
       agent: agentObj,
-      roiPotential: 'High' as ROILevel,
+      roiPotential: (marketIntelligence.roiPotential || 'High') as ROILevel,
       developmentInsight: {
-        infrastructureGrowth: 'High' as ROILevel,
-        areaTrend: 'Emerging Hot Zone' as AreaTrend,
-        nearbyKeyAdditions: ['Primary School', 'Shopping Mall'],
-        expectedAppreciation: '20% Annually',
-        aiSummary: 'This location is experiencing rapid infrastructure expansion and solid investment stability.',
-        score: 85
+        infrastructureGrowth: (marketIntelligence.roiPotential || 'High') as ROILevel,
+        areaTrend: (marketIntelligence.areaTrend || 'Emerging Hot Zone') as AreaTrend,
+        nearbyKeyAdditions: marketIntelligence.nearbyKeyAdditions || ['Primary School', 'Shopping Mall'],
+        expectedAppreciation: marketIntelligence.expectedAppreciation || '20% Annually',
+        aiSummary: marketIntelligence.aiSummary || 'This location is experiencing rapid infrastructure expansion and solid investment stability.',
+        score: marketIntelligence.infrastructureScore || 85
       },
       estateIntelligence: {
-        infrastructureScore: 80,
-        securityRating: 90,
-        powerReliability: 85,
-        roadAccessibility: 85,
-        internetCoverage: 80,
-        waterAvailability: 85,
-        appreciationTrend: 18,
-        rentalDemand: 8,
-        livabilityScore: 85
+        infrastructureScore: marketIntelligence.infrastructureScore || 80,
+        securityRating: marketIntelligence.securityRating || 90,
+        powerReliability: marketIntelligence.powerReliability || 85,
+        roadAccessibility: marketIntelligence.roadAccessibility || 85,
+        internetCoverage: marketIntelligence.internetCoverage || 80,
+        waterAvailability: marketIntelligence.waterAvailability || 85,
+        appreciationTrend: marketIntelligence.appreciationTrend || 18,
+        rentalDemand: marketIntelligence.rentalDemand || 8,
+        livabilityScore: marketIntelligence.livabilityScore || 85
       },
+      appreciationScore: marketIntelligence.appreciationTrend || 18,
+      rentalYieldEstimate: computedYield,
       aiInsights: [],
-      amenities: ['Electricity', 'Security', 'Road Accessibility'],
+      amenities: listingRequest.amenities && listingRequest.amenities.length > 0 ? listingRequest.amenities : ['Electricity', 'Security', 'Road Accessibility'],
       createdAt: nowStr,
       expiresAt: expiresAtStr,
       commission: listingRequest.commission || 5,
@@ -566,50 +550,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       verificationFeePaid: listingRequest.verificationFeePaid || false
     };
 
-    if (isLocalGuest) {
-      const guestProps = localStorage.getItem('localGuestProperties') || '[]';
-      const parsedProps = JSON.parse(guestProps);
-      const guestPropDoc = { id: `prop-${Date.now()}`, ...newPropertyData };
-      parsedProps.push(guestPropDoc);
-      localStorage.setItem('localGuestProperties', JSON.stringify(parsedProps));
-      window.dispatchEvent(new Event('local_guest_properties_updated'));
-    } else {
-      try {
-        const newDocRef = doc(collection(db, 'properties'));
-        await setDoc(newDocRef, newPropertyData);
-      } catch (error) {
-        handleFirestoreError(error, OperationType.WRITE, 'properties');
-      }
+    try {
+      const newDocRef = doc(collection(db, 'properties'));
+      await setDoc(newDocRef, newPropertyData);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'properties');
     }
   };
 
   const updateListingRequest = async (id: string, updates: Partial<ListingRequest>) => {
-    if (isLocalGuest) {
-      const updatedListings = listingRequests.map(item => 
-        item.id === id ? { ...item, ...updates } : item
-      );
-      setListingRequests(updatedListings);
-      setPlatformListings(updatedListings.filter(item => item.status === 'Agent Bidding'));
-      localStorage.setItem('localGuestListings', JSON.stringify(updatedListings));
-
-      if (updates.status === 'Approved') {
-        const listing = updatedListings.find(item => item.id === id);
-        if (listing) {
-          promoteToProperty(listing);
-        }
-      }
-      return;
-    }
     try {
-      await updateDoc(doc(db, 'listingRequests', id), updates);
+      const docRef = doc(db, 'listingRequests', id);
+      const snap = await getDoc(docRef);
+      let listingOwnerId = '';
+      let listingTitle = 'Property Listing';
+      if (snap.exists()) {
+        const data = snap.data();
+        listingOwnerId = data?.ownerId || '';
+        listingTitle = data?.title || listingTitle;
+      }
+
+      await updateDoc(docRef, updates);
 
       if (updates.status === 'Approved') {
-        const docRef = doc(db, 'listingRequests', id);
-        const snap = await getDoc(docRef);
         if (snap.exists()) {
           const listingRequest = { id: snap.id, ...snap.data(), ...updates } as ListingRequest;
           await promoteToProperty(listingRequest);
         }
+        if (listingOwnerId) {
+          sendNotification(listingOwnerId, {
+            type: 'listing_approved',
+            title: 'Listing Approved',
+            body: `Your listing "${listingTitle}" has been approved!`,
+            data: { listingId: id }
+          });
+        }
+      } else if (updates.status === 'Rejected' && listingOwnerId) {
+        sendNotification(listingOwnerId, {
+          type: 'listing_rejected',
+          title: 'Listing Rejected',
+          body: `Your listing "${listingTitle}" has been rejected.`,
+          data: { listingId: id }
+        });
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `listingRequests/${id}`);
@@ -618,12 +600,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const updateUser = async (updates: Partial<User>) => {
     if (!user) return;
-    if (isLocalGuest) {
-      const updatedUser = { ...user, ...updates };
-      setUser(updatedUser);
-      localStorage.setItem('localGuestUser', JSON.stringify(updatedUser));
-      return;
-    }
     try {
       await updateDoc(doc(db, 'users', user.id), updates);
     } catch (error) {
@@ -633,27 +609,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const addTransaction = async (transaction: Transaction) => {
     if (!user) return;
-    if (isLocalGuest) {
-      const updatedUser = {
-        ...user,
-        tokens: user.tokens + (transaction.type === 'Credit' ? transaction.amount : -transaction.amount)
-      };
-      setUser(updatedUser);
-      localStorage.setItem('localGuestUser', JSON.stringify(updatedUser));
-      
-      const localTrans = localStorage.getItem('localGuestTransactions') || '[]';
-      const parsedTrans = JSON.parse(localTrans);
-      parsedTrans.push(transaction);
-      localStorage.setItem('localGuestTransactions', JSON.stringify(parsedTrans));
-      return;
-    }
     try {
-      // For this app, transactions might be in a subcollection or just update the tokens
       const userRef = doc(db, 'users', user.id);
       await updateDoc(userRef, {
         tokens: user.tokens + (transaction.type === 'Credit' ? transaction.amount : -transaction.amount)
       });
-      // Also potentially log the transaction document
       await addDoc(collection(db, `users/${user.id}/transactions`), transaction);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `users/${user.id}/transactions`);
@@ -661,27 +621,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const updateAgentTrustScore = async (agentId: string, event: TrustScoreEvent) => {
-    if (isLocalGuest) {
-      const currentScore = user?.id === agentId ? (user?.profileScore ?? 50) : 50;
-      const dClosed = user?.id === agentId ? (user?.dealsClosedCount ?? 0) : 0;
-      const delta = calculateTrustScoreDelta(event);
-      const newScore = Math.max(0, Math.min(100, currentScore + delta));
-      const updates: Partial<User> = { profileScore: newScore };
-      if (newScore >= 90 && dClosed >= 25) {
-        updates.commissionRate = 3;
-      } else if (newScore >= 80 && dClosed >= 10) {
-        updates.commissionRate = 4;
-      } else {
-        updates.commissionRate = 5;
-      }
-      if (user && user.id === agentId) {
-        const updatedUser = { ...user, ...updates };
-        setUser(updatedUser);
-        localStorage.setItem('localGuestUser', JSON.stringify(updatedUser));
-      }
-      return;
-    }
-
     try {
       const agentRef = doc(db, 'users', agentId);
       const agentSnap = await getDoc(agentRef);
@@ -714,8 +653,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   return (
     <AuthContext.Provider value={{ 
-      user, firebaseUser, loading, error, listingRequests, platformListings, savedProperties,
-      signInWithGoogle, signInWithFacebook, signInAsGuest, signInWithGoogleMock, signInWithFacebookMock, logout,
+      user, firebaseUser, loading, error, listingRequests, platformListings, savedProperties, isLocalGuest: false,
+      signInWithGoogle, signInWithFacebook, signInWithEmail, signUpWithEmail, signInWithGoogleMock, signInWithFacebookMock, logout,
       toggleSavedProperty, addListingRequest, updateListingRequest, updateUser, addTransaction, updateAgentTrustScore
     }}>
       {children}

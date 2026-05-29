@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { useAuth } from "../context/AuthContext";
 import { useNavigation } from "../context/NavigationContext";
+import { sendNotification } from "../lib/notifications";
 import {
   Gavel,
   MapPin,
@@ -328,6 +329,15 @@ export default function AgentBidding({ onViewLeaderboard }: { onViewLeaderboard?
         agentBids: updatedBids,
         lastUpdated: new Date().toISOString(),
       });
+
+      if (targetListing.ownerId) {
+        sendNotification(targetListing.ownerId, {
+          type: 'bid_received',
+          title: 'New Bid Received',
+          body: `An agent has submitted a bid on your listing request "${targetListing.title}".`,
+          data: { listingId: reqId, agentId: user.id }
+        });
+      }
 
       setIsSubmittingBid(false);
       setBiddingSuccessId(reqId);
@@ -816,6 +826,26 @@ export default function AgentBidding({ onViewLeaderboard }: { onViewLeaderboard?
         agentBids: updatedBids,
         lastUpdated: new Date().toISOString(),
       });
+
+      // Notify the accepted agent
+      sendNotification(acceptedBid.agentId, {
+        type: 'bid_accepted',
+        title: 'Bid Accepted!',
+        body: `Your bid on "${listing.title}" has been accepted!`,
+        data: { listingId: listing.id, bidId: acceptedBid.id }
+      });
+
+      // Notify rejected agents
+      listing.agentBids.forEach(bid => {
+        if (bid.id !== acceptedBid.id) {
+          sendNotification(bid.agentId, {
+            type: 'bid_rejected',
+            title: 'Bid Declined',
+            body: `Your bid on "${listing.title}" was declined.`,
+            data: { listingId: listing.id, bidId: bid.id }
+          });
+        }
+      });
     };
 
     const handleDeclineBid = async (listingId: string, bidId: string) => {
@@ -833,6 +863,16 @@ export default function AgentBidding({ onViewLeaderboard }: { onViewLeaderboard?
         agentBids: updatedBids,
         lastUpdated: new Date().toISOString(),
       });
+
+      const declinedBid = listing.agentBids.find((b) => b.id === bidId);
+      if (declinedBid) {
+        sendNotification(declinedBid.agentId, {
+          type: 'bid_rejected',
+          title: 'Bid Declined',
+          body: `Your bid on "${listing.title}" was declined.`,
+          data: { listingId: listing.id, bidId: declinedBid.id }
+        });
+      }
     };
 
     return (

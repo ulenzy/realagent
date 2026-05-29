@@ -30,8 +30,31 @@
         "totalReviews": { "type": "number" },
         "tokens": { "type": "number" },
         "transactions": { "type": "array" },
-        "isGuest": { "type": "boolean" },
+        "phoneVerified": { "type": "boolean" },
+        "phoneVerifiedAt": { "type": "string", "format": "date-time" },
         "savedProperties": { "type": "array" },
+        "preferences": {
+          "type": "object",
+          "properties": {
+            "theme": { "type": "string", "enum": ["light", "dark", "system"] },
+            "notifications": {
+              "type": "object",
+              "properties": {
+                "bidReceived": { "type": "boolean" },
+                "listingApproved": { "type": "boolean" },
+                "inspectionConfirmed": { "type": "boolean" },
+                "messageReceived": { "type": "boolean" },
+                "dealStatusUpdate": { "type": "boolean" },
+                "marketingUpdates": { "type": "boolean" }
+              }
+            },
+            "language": { "type": "string", "enum": ["en"] },
+            "currency": { "type": "string", "enum": ["NGN", "USD", "GBP"] },
+            "defaultSearchView": { "type": "string", "enum": ["list", "map"] },
+            "defaultListingType": { "type": "string", "enum": ["All", "Sale", "Rent"] }
+          }
+        },
+        "profileVisible": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "email", "name"]
@@ -103,12 +126,47 @@
         "blocked": { "type": "boolean" }
       },
       "required": ["senderId", "receiverId", "text", "timestamp", "blocked"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "In-app notifications sent to users",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "body": { "type": "string" },
+        "type": { "type": "string" },
+        "data": { "type": "object" },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "body", "type", "read", "createdAt"]
+    },
+    "InspectionRequest": {
+      "title": "InspectionRequest",
+      "description": "Inspection booking requests with paystack stub pending",
+      "type": "object",
+      "properties": {
+        "listingId": { "type": "string" },
+        "propertyId": { "type": "string" },
+        "buyerId": { "type": "string" },
+        "agentId": { "type": "string" },
+        "scheduledDate": { "type": "string" },
+        "timeSlot": { "type": "string" },
+        "feeStatus": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["listingId", "propertyId", "buyerId", "agentId", "scheduledDate", "timeSlot", "feeStatus", "status", "createdAt"]
     }
   },
   "firestore": {
     "users/{userId}": {
       "schema": "User",
       "description": "Authenticated user profiles"
+    },
+    "users/{userId}/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "In-app read/unread notifications list for each user"
     },
     "listingRequests/{requestId}": {
       "schema": "ListingRequest",
@@ -125,6 +183,10 @@
     "chats/{chatId}/messages/{messageId}": {
       "schema": "ChatMessage",
       "description": "Individual messages inside active chat threads"
+    },
+    "inspectionRequests/{requestId}": {
+      "schema": "InspectionRequest",
+      "description": "Property inspection booking requests"
     }
   }
 }

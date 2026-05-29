@@ -50,9 +50,12 @@ import {
   Mail,
   Facebook,
 } from "lucide-react";
-import { useAuth } from "../context/AuthContext";
+import { useAuth, DEFAULT_PREFERENCES } from "../context/AuthContext";
+import { Sliders, Globe, AlertOctagon, ChevronDown } from "lucide-react";
 import { useNavigation } from "../context/NavigationContext";
 import { getUserAvatarUrl } from "../lib/avatar";
+import { AVATAR_COSMETICS, FRAME_COSMETICS, TITLE_COSMETICS } from "../constants/cosmetics";
+import { Crown, Flame, ShoppingBag, Tag } from "lucide-react";
 import { collection, query, where, getDocs, doc, updateDoc } from "firebase/firestore";
 import { RecaptchaVerifier, signInWithPhoneNumber } from "firebase/auth";
 import { auth, db } from "../lib/firebase";
@@ -102,6 +105,8 @@ export default function Profile({
     | "Customize Profile"
     | "Wallet"
     | "Admin Panel"
+    | "Preferences"
+    | "Account Settings"
   >(initialView);
 
   useEffect(() => {
@@ -111,6 +116,32 @@ export default function Profile({
   const [isTopUpOpen, setIsTopUpOpen] = useState(false);
   const [selectedBundle, setSelectedBundle] = useState<any>(TOKEN_BUNDLES[0]);
   const [purchaseSuccess, setPurchaseSuccess] = useState<string | null>(null);
+
+  const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
+  const [isAccountSettingsOpen, setIsAccountSettingsOpen] = useState(false);
+  const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
+  const [isDangerZoneOpen, setIsDangerZoneOpen] = useState(false);
+  const [deleteConfirmEmail, setDeleteConfirmEmail] = useState('');
+  const [isPasswordToastVisible, setIsPasswordToastVisible] = useState(false);
+  const [activeSessions, setActiveSessions] = useState([
+    { device: 'Chrome on MacOS (This device)', active: true, location: 'Lagos, Nigeria' },
+    { device: 'Safari on iPhone', active: false, location: 'Abuja, Nigeria' }
+  ]);
+  const [activeSessionsAlert, setActiveSessionsAlert] = useState<string | null>(null);
+
+  const handleUpdatePreference = (updates: Partial<typeof user.preferences>) => {
+    const currentPrefs = user.preferences || DEFAULT_PREFERENCES;
+    updateUser({
+      preferences: {
+        ...currentPrefs,
+        ...updates,
+        notifications: {
+          ...(currentPrefs.notifications || DEFAULT_PREFERENCES.notifications),
+          ...(updates.notifications || {})
+        }
+      }
+    });
+  };
 
   const handlePurchaseTokensConfirm = async () => {
     if (!selectedBundle) return;
@@ -360,6 +391,14 @@ export default function Profile({
 
   const [avatarPreview, setAvatarPreview] = useState(user.avatarSeed || "User");
   const [rollsUsed, setRollsUsed] = useState(0);
+
+  // Cosmetics Marketplace States
+  const [cosmeticTab, setCosmeticTab] = useState<'avatars' | 'frames' | 'titles'>('avatars');
+  const [selectedCosmeticId, setSelectedCosmeticId] = useState<string>('common_1');
+  const [rarityFilter, setRarityFilter] = useState<'All' | 'Common' | 'Uncommon' | 'Rare' | 'Epic' | 'Legendary'>('All');
+  const [cosmeticSuccessMsg, setCosmeticSuccessMsg] = useState<string | null>(null);
+  const [cosmeticErrorMsg, setCosmeticErrorMsg] = useState<string | null>(null);
+  const [isBuyingInProgress, setIsBuyingInProgress] = useState(false);
   const [locationInput, setLocationInput] = useState("");
   const [suggestions, setSuggestions] = useState<string[]>([]);
 
@@ -398,6 +437,183 @@ export default function Profile({
       setNinError(null);
     }
   }, [activeModal, user]);
+
+  // --- Cosmetics Purchases & Equip Handlers ---
+  const buyAvatar = async (avatar: any) => {
+    if (!user) return;
+    const owned = user.ownedAvatars || ['common_1', 'common_2', 'common_3'];
+    if (owned.includes(avatar.id)) {
+      setCosmeticErrorMsg("You already own this avatar.");
+      return;
+    }
+    if ((user.tokens || 0) < avatar.price) {
+      setCosmeticErrorMsg(`Insufficent tokens. This avatar costs ${avatar.price} tokens.`);
+      return;
+    }
+    
+    try {
+      const updatedOwned = [...owned, avatar.id];
+      await updateUser({
+        tokens: (user.tokens || 0) - avatar.price,
+        ownedAvatars: updatedOwned
+      });
+      
+      if (addTransaction) {
+        await addTransaction({
+          id: `burn-[avatar]-${Date.now()}`,
+          type: 'Debit',
+          amount: avatar.price,
+          description: `Cosmetic Burn: Unlocked Avatar [${avatar.name}]`,
+          timestamp: new Date().toISOString()
+        });
+      }
+      
+      setCosmeticSuccessMsg(`Unlocked ${avatar.name}!`);
+      setTimeout(() => setCosmeticSuccessMsg(null), 4000);
+    } catch (e) {
+      console.error(e);
+      setCosmeticErrorMsg("Payment processing failed.");
+    }
+  };
+
+  const equipAvatar = async (avatarId: string) => {
+    if (!user) return;
+    const owned = user.ownedAvatars || ['common_1', 'common_2', 'common_3'];
+    const avatar = AVATAR_COSMETICS.find(a => a.id === avatarId);
+    const isCommon = avatar?.rarity === 'Common';
+    if (!owned.includes(avatarId) && !isCommon) {
+      setCosmeticErrorMsg("You do not own this avatar.");
+      return;
+    }
+    
+    try {
+      await updateUser({
+        equippedAvatarId: avatarId,
+        avatarSeed: avatar?.seed,
+        avatarTier: avatar?.rarity === 'Epic' ? 'Epic' : avatar?.rarity === 'Legendary' ? 'Legendary' : 'Standard'
+      });
+      setCosmeticSuccessMsg(`Equipped ${avatar?.name || 'Avatar'}!`);
+      setTimeout(() => setCosmeticSuccessMsg(null), 3000);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const buyFrame = async (frame: any) => {
+    if (!user) return;
+    const owned = user.ownedFrames || ['frame_none'];
+    if (owned.includes(frame.id)) {
+      setCosmeticErrorMsg("You already own this border frame.");
+      return;
+    }
+    if ((user.tokens || 0) < frame.price) {
+      setCosmeticErrorMsg(`Insufficent tokens. This frame costs ${frame.price} tokens.`);
+      return;
+    }
+    
+    try {
+      const updatedOwned = [...owned, frame.id];
+      await updateUser({
+        tokens: (user.tokens || 0) - frame.price,
+        ownedFrames: updatedOwned
+      });
+      
+      if (addTransaction) {
+        await addTransaction({
+          id: `burn-[frame]-${Date.now()}`,
+          type: 'Debit',
+          amount: frame.price,
+          description: `Cosmetic Burn: Unlocked Frame [${frame.name}]`,
+          timestamp: new Date().toISOString()
+        });
+      }
+      
+      setCosmeticSuccessMsg(`Unlocked ${frame.name}!`);
+      setTimeout(() => setCosmeticSuccessMsg(null), 4000);
+    } catch (e) {
+      console.error(e);
+      setCosmeticErrorMsg("Payment processing failed.");
+    }
+  };
+
+  const equipFrame = async (frameId: string) => {
+    if (!user) return;
+    const owned = user.ownedFrames || ['frame_none'];
+    const frame = FRAME_COSMETICS.find(f => f.id === frameId);
+    const isFree = frame?.rarity === 'Common' && frame.price === 0;
+    if (!owned.includes(frameId) && !isFree) {
+      setCosmeticErrorMsg("You do not own this frame.");
+      return;
+    }
+    
+    try {
+      await updateUser({
+        equippedFrameId: frameId
+      });
+      setCosmeticSuccessMsg(`Equipped border frame: ${frame?.name}!`);
+      setTimeout(() => setCosmeticSuccessMsg(null), 3000);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const buyTitle = async (title: any) => {
+    if (!user) return;
+    const owned = user.ownedTitles || ['title_none', 'title_common_scout'];
+    if (owned.includes(title.id)) {
+      setCosmeticErrorMsg("You already own this title.");
+      return;
+    }
+    if ((user.tokens || 0) < title.price) {
+      setCosmeticErrorMsg(`Insufficent tokens. This title costs ${title.price} tokens.`);
+      return;
+    }
+    
+    try {
+      const updatedOwned = [...owned, title.id];
+      await updateUser({
+        tokens: (user.tokens || 0) - title.price,
+        ownedTitles: updatedOwned
+      });
+      
+      if (addTransaction) {
+        await addTransaction({
+          id: `burn-[title]-${Date.now()}`,
+          type: 'Debit',
+          amount: title.price,
+          description: `Cosmetic Burn: Unlocked Title [${title.name}]`,
+          timestamp: new Date().toISOString()
+        });
+      }
+      
+      setCosmeticSuccessMsg(`Unlocked ${title.name}!`);
+      setTimeout(() => setCosmeticSuccessMsg(null), 4000);
+    } catch (e) {
+      console.error(e);
+      setCosmeticErrorMsg("Payment processing failed.");
+    }
+  };
+
+  const equipTitle = async (titleId: string) => {
+    if (!user) return;
+    const owned = user.ownedTitles || ['title_none', 'title_common_scout'];
+    const title = TITLE_COSMETICS.find(t => t.id === titleId);
+    const isFree = title?.rarity === 'Common' && title.price === 0;
+    if (!owned.includes(titleId) && !isFree) {
+      setCosmeticErrorMsg("You do not own this title.");
+      return;
+    }
+    
+    try {
+      await updateUser({
+        equippedTitleId: titleId
+      });
+      setCosmeticSuccessMsg(`Equipped title: ${title?.name}!`);
+      setTimeout(() => setCosmeticSuccessMsg(null), 3000);
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   const handleSendOTP = async () => {
     setPhoneError(null);
@@ -633,6 +849,8 @@ export default function Profile({
         "Price Alerts",
         "Customize Profile",
         "Wallet",
+        "Preferences",
+        "Account Settings",
       ].includes(action)
     ) {
       setActiveView(action as any);
@@ -728,18 +946,39 @@ export default function Profile({
           <div className="max-w-4xl mx-auto px-4 py-8">
             <div className="bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 p-6 shadow-aggressive">
               <div className="flex gap-6 items-start mb-8">
-                <div className="w-32 h-32 bg-brand-teal border-4 border-brand-black overflow-hidden shadow-brutal">
-                  <img
-                    src={getUserAvatarUrl(user)}
-                    alt="Preview"
-                    className="w-full h-full"
-                    referrerPolicy="no-referrer"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src =
-                        `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=2bdctb&color=000`;
-                    }}
-                  />
-                </div>
+                {(() => {
+                  const equippedFrame = FRAME_COSMETICS.find(f => f.id === user?.equippedFrameId);
+                  const frameClass = equippedFrame && equippedFrame.id !== 'frame_none'
+                    ? equippedFrame.className
+                    : "border-4 border-brand-black shadow-brutal";
+                  const activeAvatarId = user?.equippedAvatarId || 'common_1';
+                  const matchAv = AVATAR_COSMETICS.find(a => a.id === activeAvatarId);
+                  const isLegendary = matchAv?.rarity === 'Legendary';
+                  const isEpic = matchAv?.rarity === 'Epic';
+
+                  return (
+                    <div className="relative">
+                      {isLegendary && (
+                        <div className="absolute -inset-1.5 bg-amber-400 rounded-sm opacity-50 blur-sm animate-pulse" />
+                      )}
+                      {isEpic && (
+                        <div className="absolute -inset-1 bg-purple-500 rounded-sm opacity-35 blur-xs animate-pulse" />
+                      )}
+                      <div className={cn("w-32 h-32 bg-zinc-800 overflow-hidden relative flex items-center justify-center", frameClass)}>
+                        <img
+                          src={getUserAvatarUrl(user)}
+                          alt="Preview"
+                          className="w-full h-full object-cover"
+                          referrerPolicy="no-referrer"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src =
+                              `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=2bdctb&color=000`;
+                          }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })()}
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-1">
                     <h2 className="text-3xl font-display font-black uppercase italic tracking-tighter">
@@ -749,6 +988,22 @@ export default function Profile({
                       <ShieldCheck className="text-brand-teal" size={20} />
                     )}
                   </div>
+                  
+                  {/* Equipped Title Display */}
+                  {(() => {
+                    const activeTitle = TITLE_COSMETICS.find(t => t.id === user?.equippedTitleId);
+                    if (activeTitle && activeTitle.id !== 'title_none') {
+                      return (
+                        <div className="mb-2">
+                          <span className={cn("px-2.5 py-0.5 rounded text-[10px] uppercase font-mono tracking-widest font-extrabold inline-block", activeTitle.className)}>
+                            {activeTitle.name}
+                          </span>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+
                   {renderRoleTierBadges(user)}
                   <div className="mb-4">{renderStars(user.rating || 4.5)}</div>
                   <p className="text-xs font-medium text-zinc-600 dark:text-zinc-400 leading-relaxed mb-4">
@@ -1045,7 +1300,7 @@ export default function Profile({
                                 firstName: e.target.value,
                               })
                             }
-                            className="brutalist-input h-10 text-xs bg-zinc-800 border-zinc-700 text-white w-full placeholder:text-zinc-600"
+                            className="brutalist-input h-10 text-xs bg-[#dadcd8] dark:bg-zinc-800 border-zinc-700 text-brand-black dark:text-white w-full placeholder:text-zinc-500 dark:placeholder:text-zinc-400"
                             placeholder="e.g. John"
                           />
                         </div>
@@ -1062,7 +1317,7 @@ export default function Profile({
                                 lastName: e.target.value,
                               })
                             }
-                            className="brutalist-input h-10 text-xs bg-zinc-800 border-zinc-700 text-white w-full placeholder:text-zinc-600"
+                            className="brutalist-input h-10 text-xs bg-[#dadcd8] dark:bg-zinc-800 border-zinc-700 text-brand-black dark:text-white w-full placeholder:text-zinc-500 dark:placeholder:text-zinc-400"
                             placeholder="e.g. Doe"
                           />
                         </div>
@@ -1090,7 +1345,7 @@ export default function Profile({
                             })
                           }
                           className={cn(
-                            "brutalist-input h-10 text-xs bg-zinc-800 border-zinc-700 text-white w-full placeholder:text-zinc-600",
+                            "brutalist-input h-10 text-xs bg-[#dadcd8] dark:bg-zinc-800 border-zinc-700 text-brand-black dark:text-white w-full placeholder:text-zinc-500 dark:placeholder:text-zinc-400",
                             nameError ? "border-red-500" : "",
                           )}
                           placeholder="e.g. John Doe"
@@ -1114,7 +1369,7 @@ export default function Profile({
                               phoneNumber: e.target.value,
                             })
                           }
-                          className="brutalist-input h-10 text-xs bg-zinc-800 border-zinc-700 text-white w-full placeholder:text-zinc-600"
+                          className="brutalist-input h-10 text-xs bg-[#dadcd8] dark:bg-zinc-800 border-zinc-700 text-brand-black dark:text-white w-full placeholder:text-zinc-500 dark:placeholder:text-zinc-400"
                           placeholder="+234 ..."
                         />
                       </div>
@@ -1130,7 +1385,7 @@ export default function Profile({
                               bio: e.target.value,
                             })
                           }
-                          className="brutalist-input min-h-[80px] py-3 text-xs bg-zinc-800 border-zinc-700 text-white leading-relaxed resize-none w-full placeholder:text-zinc-600"
+                          className="brutalist-input min-h-[80px] py-3 text-xs bg-[#dadcd8] dark:bg-zinc-800 border-zinc-700 text-brand-black dark:text-white leading-relaxed resize-none w-full placeholder:text-zinc-500 dark:placeholder:text-zinc-400"
                           placeholder="Tell us about yourself..."
                         />
                       </div>
@@ -1147,7 +1402,7 @@ export default function Profile({
                                 role: e.target.value as any,
                               })
                             }
-                            className="brutalist-input h-10 text-xs bg-zinc-800 border-zinc-700 text-white w-full"
+                            className="brutalist-input h-10 text-xs bg-[#dadcd8] dark:bg-zinc-800 border-zinc-700 text-brand-black dark:text-white w-full"
                           >
                             <option value="Buyer">
                               Property Buyer / Investor
@@ -1170,7 +1425,7 @@ export default function Profile({
                                 gender: e.target.value as any,
                               })
                             }
-                            className="brutalist-input h-10 text-xs bg-zinc-800 border-zinc-700 text-white w-full"
+                            className="brutalist-input h-10 text-xs bg-[#dadcd8] dark:bg-zinc-800 border-zinc-700 text-brand-black dark:text-white w-full"
                           >
                             <option value="Male">Male</option>
                             <option value="Female">Female</option>
@@ -1184,196 +1439,625 @@ export default function Profile({
                     </div>
                   </div>
 
-                  {/* Avatar Customization */}
-                  <div className="bg-zinc-900 border-2 border-zinc-800 p-4 space-y-4">
-                    <h4 className="text-[10px] font-black uppercase text-brand-teal tracking-widest">
-                      Digital Identity Designer
-                    </h4>
-                    <div className="flex gap-6 items-start">
-                      <div className="flex flex-col items-center gap-3">
-                        <div className="w-24 h-24 bg-brand-teal border-4 border-brand-black overflow-hidden shadow-brutal-sm">
-                          <img
-                            src={getUserAvatarUrl(
-                              profileEditData,
-                              avatarPreview,
-                            )}
-                            alt="Preview"
-                            className="w-full h-full"
-                            referrerPolicy="no-referrer"
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).src =
-                                `https://ui-avatars.com/api/?name=${encodeURIComponent(profileEditData.name)}&background=2bdctb&color=000`;
-                            }}
-                          />
-                        </div>
-                        <div className="text-center w-full">
-                          <p className="text-[8px] font-black uppercase text-zinc-500 mb-1">
-                            Rolls: {rollsUsed}/{isSubscriber ? "∞" : "1"}
-                          </p>
-                          <div className="flex flex-col gap-2 w-full">
-                            <button
-                              disabled={!isSubscriber && rollsUsed >= 1}
-                              onClick={() => {
-                                setAvatarPreview(
-                                  Math.random().toString(36).substring(7),
-                                );
-                                setProfileEditData({
-                                  ...profileEditData,
-                                  avatarTier: "Standard",
-                                  avatarSeed: Math.random()
-                                    .toString(36)
-                                    .substring(7),
-                                });
-                                setRollsUsed((prev) => prev + 1);
-                              }}
-                              className="w-full bg-white text-brand-black px-2 py-1 text-[9px] font-black uppercase border-2 border-brand-black shadow-brutal-xs disabled:opacity-50 flex items-center justify-center"
-                            >
-                              <Dices size={12} className="inline mr-1" /> Basic
-                            </button>
-                            <button
-                              disabled={!isSubscriber}
-                              onClick={() => {
-                                if (!isSubscriber) return;
-                                setAvatarPreview(
-                                  Math.random().toString(36).substring(7),
-                                );
-                                setProfileEditData({
-                                  ...profileEditData,
-                                  avatarTier: "Epic",
-                                  avatarSeed: Math.random()
-                                    .toString(36)
-                                    .substring(7),
-                                });
-                                setRollsUsed((prev) => prev + 1);
-                              }}
-                              className={cn(
-                                "w-full px-2 py-1 text-[9px] font-black uppercase border-2 flex items-center justify-center transition-colors relative group",
-                                isSubscriber
-                                  ? "text-purple-400 bg-zinc-900 border-purple-500 hover:bg-purple-500 hover:text-white"
-                                  : "text-zinc-500 bg-zinc-800 border-zinc-700 cursor-not-allowed opacity-70",
+                  {/* CSS Keyframes for High-Tier Premium Cosmetics */}
+                  <div className="hidden">
+                    <style>{`
+                      @keyframes float-particle {
+                        0% { transform: translateY(0px) scale(0.8); opacity: 0; }
+                        55% { opacity: 0.8; }
+                        100% { transform: translateY(-36px) scale(1.2); opacity: 0; }
+                      }
+                      @keyframes pulse-aura-gold {
+                        0% { box-shadow: 0 0 8px rgba(245, 158, 11, 0.4), inset 0 0 10px rgba(245, 158, 11, 0.2); }
+                        50% { box-shadow: 0 0 24px rgba(251, 191, 36, 0.9), inset 0 0 16px rgba(251, 191, 36, 0.4); }
+                        100% { box-shadow: 0 0 8px rgba(245, 158, 11, 0.4), inset 0 0 10px rgba(245, 158, 11, 0.2); }
+                      }
+                      @keyframes pulse-aura-purple {
+                        0% { box-shadow: 0 0 8px rgba(168, 85, 247, 0.4), inset 0 0 8px rgba(168, 85, 247, 0.2); }
+                        50% { box-shadow: 0 0 20px rgba(168, 85, 247, 0.8), inset 0 0 14px rgba(168, 85, 247, 0.4); }
+                        100% { box-shadow: 0 0 8px rgba(168, 85, 247, 0.4), inset 0 0 8px rgba(168, 85, 247, 0.2); }
+                      }
+                      @keyframes gold-glitter {
+                        0% { background-position: 0% 50%; }
+                        50% { background-position: 100% 50%; }
+                        100% { background-position: 0% 50%; }
+                      }
+                      .animate-bounce-slow {
+                        animation: bounce 3s infinite;
+                      }
+                      .text-legendary-sparkle {
+                        background: linear-gradient(90deg, #d97706, #fbbf24, #fef08a, #fbbf24, #d97706);
+                        background-size: 200% auto;
+                        color: transparent;
+                        -webkit-background-clip: text;
+                        background-clip: text;
+                        animation: gold-glitter 4s linear infinite;
+                      }
+                    `}</style>
+                  </div>
+
+                  {/* Dynamic Identity & Digital Collectibles Marketplace */}
+                  <div className="bg-zinc-950 border-2 border-zinc-800 p-5 space-y-5 rounded-md relative text-white">
+                    <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
+                      <div>
+                        <h4 className="text-xs font-black uppercase text-brand-teal tracking-widest flex items-center gap-2">
+                          <Crown size={14} className="text-amber-400 fill-amber-400" /> Digital Identity & Cosmetics Shop
+                        </h4>
+                        <p className="text-[10px] text-zinc-500 font-mono mt-0.5">Structured Level & Asset Progression System</p>
+                      </div>
+                      <div className="flex items-center gap-1.5 px-3 py-1 bg-zinc-900 border border-amber-500/30 text-amber-400 shadow-inner rounded">
+                        <Flame size={12} className="text-amber-500 fill-amber-500 animate-pulse" />
+                        <span className="text-[10px] font-mono tracking-widest uppercase">Wallet: <strong className="font-extrabold text-sm">{user?.tokens || 0}</strong> Tokens</span>
+                      </div>
+                    </div>
+
+                    {/* Live Digital Identity Preview Block */}
+                    <div className="bg-zinc-900/80 border border-zinc-800 p-4 rounded flex flex-col md:flex-row gap-5 items-center relative overflow-hidden">
+                      {/* Animated Particles & Glow Effects background */}
+                      {(() => {
+                        const activeId = user?.equippedAvatarId || 'common_1';
+                        const match = AVATAR_COSMETICS.find(a => a.id === activeId);
+                        const rarity = match?.rarity || 'Common';
+                        if (rarity === 'Legendary') {
+                          return <div className="absolute inset-0 bg-gradient-to-r from-amber-500/5 via-transparent to-amber-500/5 pointer-events-none z-0" />;
+                        } else if (rarity === 'Epic') {
+                          return <div className="absolute inset-0 bg-gradient-to-r from-purple-500/5 via-transparent to-purple-500/5 pointer-events-none z-0" />;
+                        }
+                        return null;
+                      })()}
+
+                      <div className="relative flex-shrink-0 z-10">
+                        {(() => {
+                          const activeId = user?.equippedAvatarId || 'common_1';
+                          const match = AVATAR_COSMETICS.find(a => a.id === activeId);
+                          const rarity = match?.rarity || 'Common';
+                          const isLegendary = rarity === 'Legendary';
+                          const isEpic = rarity === 'Epic';
+                          
+                          const equippedFrame = FRAME_COSMETICS.find(f => f.id === user?.equippedFrameId);
+                          const frameClass = equippedFrame && equippedFrame.id !== 'frame_none'
+                            ? equippedFrame.className
+                            : "border-4 border-zinc-700 shadow-brutal-xs";
+
+                          return (
+                            <div className="relative group">
+                              {/* Glowing Backdrop */}
+                              {isLegendary && (
+                                <div className="absolute -inset-1.5 bg-amber-400 rounded-sm opacity-40 blur-sm animate-pulse" />
                               )}
-                            >
-                              {!isSubscriber && (
-                                <Lock size={10} className="mr-1" />
+                              {isEpic && (
+                                <div className="absolute -inset-1 bg-purple-500 rounded-sm opacity-30 blur-xs animate-pulse" />
                               )}
-                              <Dices size={12} className="inline mr-1" /> Epic
-                            </button>
-                            <button
-                              disabled={!isSubscriber}
-                              onClick={() => {
-                                if (!isSubscriber) return;
-                                setAvatarPreview(
-                                  Math.random().toString(36).substring(7),
-                                );
-                                setProfileEditData({
-                                  ...profileEditData,
-                                  avatarTier: "Legendary",
-                                  avatarSeed: Math.random()
-                                    .toString(36)
-                                    .substring(7),
-                                });
-                                setRollsUsed((prev) => prev + 1);
-                              }}
-                              className={cn(
-                                "w-full px-2 py-1 text-[9px] font-black uppercase border-2 flex items-center justify-center transition-colors relative group",
-                                isSubscriber
-                                  ? "text-amber-400 bg-zinc-900 border-amber-500 hover:bg-amber-500 hover:text-white"
-                                  : "text-zinc-500 bg-zinc-800 border-zinc-700 cursor-not-allowed opacity-70",
-                              )}
-                            >
-                              {!isSubscriber && (
-                                <Lock size={10} className="mr-1" />
-                              )}
-                              <Dices size={12} className="inline mr-1" />{" "}
-                              Legendary
-                            </button>
-                          </div>
-                        </div>
+                              
+                              <div
+                                className={cn(
+                                  "w-20 h-20 bg-zinc-800 overflow-hidden relative transition-all flex items-center justify-center",
+                                  frameClass
+                                )}
+                                style={isLegendary ? { animation: 'pulse-aura-gold 3s infinite ease-in-out' } : isEpic ? { animation: 'pulse-aura-purple 3s infinite ease-in-out' } : {}}
+                              >
+                                <img
+                                  src={getUserAvatarUrl(user || {})}
+                                  alt="Live Preview"
+                                  className="w-full h-full object-cover relative z-10"
+                                  referrerPolicy="no-referrer"
+                                  onError={(e) => {
+                                    (e.target as HTMLImageElement).src =
+                                      `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name || 'User')}&background=2bdctb&color=000`;
+                                  }}
+                                />
+
+                                {/* Interactive Particles */}
+                                {isLegendary && (
+                                  <div className="absolute inset-x-0 bottom-0 top-0 pointer-events-none overflow-hidden z-20">
+                                    <div className="absolute bottom-0 left-2 w-1 h-1 bg-yellow-200 rounded-full" style={{ animation: 'float-particle 1.8s infinite ease-out', animationDelay: '0s' }} />
+                                    <div className="absolute bottom-0 right-2 w-1.5 h-1.5 bg-amber-300 rounded-full" style={{ animation: 'float-particle 2.4s infinite ease-out', animationDelay: '0.4s' }} />
+                                    <div className="absolute bottom-0 left-1/2 w-1 h-1 bg-white rounded-full" style={{ animation: 'float-particle 2.1s infinite ease-out', animationDelay: '1.1s' }} />
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
 
-                      <div className="flex-1 grid grid-cols-1 gap-3">
-                        <div className="grid grid-cols-2 gap-2">
+                      <div className="flex-1 text-center md:text-left z-10 w-full">
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
                           <div>
-                            <label className="text-[8px] font-black uppercase text-zinc-500 mb-1 block">
-                              Hair Style
-                            </label>
-                            <select
-                              className="brutalist-input h-8 text-[10px] bg-zinc-800 border-zinc-700 text-white w-full"
-                              value={profileEditData.avatarOptions.hairStyle}
-                              onChange={(e) =>
-                                setProfileEditData({
-                                  ...profileEditData,
-                                  avatarOptions: {
-                                    ...profileEditData.avatarOptions,
-                                    hairStyle: e.target.value,
-                                  },
-                                  avatarSeed: `${avatarPreview}-${e.target.value}`,
-                                })
+                            <div className="flex items-center justify-center md:justify-start gap-2 mb-1">
+                              <span className="text-sm font-display font-black tracking-wider text-white">
+                                {user?.name}
+                              </span>
+                              {user?.kycStatus === 'Verified' && (
+                                <span className="w-4 h-4 bg-brand-teal text-brand-black rounded-full flex items-center justify-center text-[8px] font-black">✓</span>
+                              )}
+                            </div>
+                            
+                            {/* Active User Title container */}
+                            {(() => {
+                              const match = TITLE_COSMETICS.find(t => t.id === user?.equippedTitleId);
+                              if (match && match.id !== 'title_none') {
+                                return (
+                                  <div className="my-1.5 flex justify-center md:justify-start">
+                                    <span className={cn("px-2 py-0.5 rounded text-[9px] uppercase font-mono tracking-widest font-black inline-block", match.className)}>
+                                      {match.name}
+                                    </span>
+                                  </div>
+                                );
                               }
-                            >
-                              <option value="shortHair">Short</option>
-                              <option value="longHair">Long</option>
-                              <option value="bob">Bob</option>
-                              <option value="curly">Curly</option>
-                              <option value="shaggy">Shaggy</option>
-                              <option value="frida">Frida</option>
-                              <option value="frizzle">Frizzle</option>
-                            </select>
+                              return (
+                                <p className="text-[9px] text-zinc-500 uppercase tracking-widest font-mono">No Active Title Equipped</p>
+                              );
+                            })()}
                           </div>
-                          <div>
-                            <label className="text-[8px] font-black uppercase text-zinc-500 mb-1 block">
-                              Hair Color
-                            </label>
-                            <select
-                              className="brutalist-input h-8 text-[10px] bg-zinc-800 border-zinc-700 text-white w-full"
-                              value={profileEditData.avatarOptions.hairColor}
-                              onChange={(e) =>
-                                setProfileEditData({
-                                  ...profileEditData,
-                                  avatarOptions: {
-                                    ...profileEditData.avatarOptions,
-                                    hairColor: e.target.value,
-                                  },
-                                  avatarSeed: `${avatarPreview}-${e.target.value}`,
-                                })
-                              }
-                            >
-                              <option value="black">Black</option>
-                              <option value="brown">Brown</option>
-                              <option value="blonde">Blonde</option>
-                              <option value="red">Red</option>
-                              <option value="silverGray">Silver</option>
-                            </select>
+                          
+                          <div className="bg-zinc-950 p-2 border border-zinc-800 rounded self-center md:self-auto">
+                            {(() => {
+                              const activeAvId = user?.equippedAvatarId || 'common_1';
+                              const match = AVATAR_COSMETICS.find(a => a.id === activeAvId);
+                              const rarity = match?.rarity || 'Common';
+                              
+                              const rarityBadgeClass = 
+                                rarity === 'Legendary' ? 'text-amber-400 bg-amber-500/10 border-amber-500/30' :
+                                rarity === 'Epic' ? 'text-purple-400 bg-purple-500/10 border-purple-500/30' :
+                                rarity === 'Rare' ? 'text-blue-400 bg-blue-500/10 border-blue-500/30' :
+                                rarity === 'Uncommon' ? 'text-green-400 bg-green-500/10 border-green-500/30' :
+                                'text-zinc-400 bg-zinc-500/10 border-zinc-500/20';
+
+                              return (
+                                <div className="text-center font-mono">
+                                  <p className="text-[7px] text-zinc-600 uppercase font-black tracking-widest mb-0.5">ACTIVE COGNITIVE TIER</p>
+                                  <span className={cn("text-[9px] font-extrabold uppercase px-2 py-0.5 border rounded-none block", rarityBadgeClass)}>
+                                    {rarity} : {match?.name || 'Standard Agent'}
+                                  </span>
+                                </div>
+                              );
+                            })()}
                           </div>
                         </div>
-                        <div>
-                          <label className="text-[8px] font-black uppercase text-zinc-500 mb-1 block">
-                            Headwear
-                          </label>
-                          <select
-                            className="brutalist-input h-8 text-[10px] bg-zinc-800 border-zinc-700 text-white w-full"
-                            value={profileEditData.avatarOptions.headwear}
-                            onChange={(e) =>
-                              setProfileEditData({
-                                ...profileEditData,
-                                avatarOptions: {
-                                  ...profileEditData.avatarOptions,
-                                  headwear: e.target.value,
-                                },
-                                avatarSeed: `${avatarPreview}-${e.target.value}`,
-                              })
-                            }
+
+                        {/* Status Message System */}
+                        {cosmeticSuccessMsg && (
+                          <div className="mt-3 p-2 bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 text-[10px] font-black uppercase tracking-wider rounded animate-pulse">
+                            🎉 {cosmeticSuccessMsg}
+                          </div>
+                        )}
+                        {cosmeticErrorMsg && (
+                          <div className="mt-3 p-2 bg-red-500/15 border border-red-500/40 text-red-400 text-[10px] font-black uppercase tracking-wider rounded">
+                            ⚠️ {cosmeticErrorMsg}
+                            {cosmeticErrorMsg.includes("Insufficent") && (
+                              <button 
+                                onClick={() => setActiveView("Wallet")}
+                                className="ml-2 underline text-white hover:text-brand-teal font-black"
+                              >
+                                TOP UP
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Navigation Tabs */}
+                    <div className="flex border-b-2 border-zinc-800">
+                      {[
+                        { id: 'avatars', label: '👥 AVATAR PORTRAITS', icon: Sparkles },
+                        { id: 'frames', label: '🖼️ PROFILE BORDERS', icon: Crown },
+                        { id: 'titles', label: '🏷️ COMMEMORATIVE TITLES', icon: Tag }
+                      ].map((tab) => {
+                        const Icon = tab.icon;
+                        const isActive = cosmeticTab === tab.id;
+                        return (
+                          <button
+                            key={tab.id}
+                            id={`tab-btn-${tab.id}`}
+                            onClick={() => {
+                              setCosmeticTab(tab.id as any);
+                              // Auto-select first in lists
+                              if (tab.id === 'avatars') setSelectedCosmeticId('common_1');
+                              else if (tab.id === 'frames') setSelectedCosmeticId('frame_none');
+                              else if (tab.id === 'titles') setSelectedCosmeticId('title_none');
+                              setCosmeticErrorMsg(null);
+                            }}
+                            className={cn(
+                              "flex-1 py-3 text-[10px] font-black uppercase tracking-widest border-b-4 flex items-center justify-center gap-1.5 transition-all outline-none",
+                              isActive
+                                ? "border-brand-teal text-brand-teal bg-zinc-900 font-extrabold"
+                                : "border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/50"
+                            )}
                           >
-                            <option value="none">None</option>
-                            <option value="hat">Hat</option>
-                            <option value="hijab">Hijab</option>
-                            <option value="turban">Turban</option>
-                            <option value="winterHat">Winter Hat</option>
-                          </select>
-                        </div>
+                            <Icon size={12} className={cn("shrink-0", isActive ? "text-brand-teal" : "text-zinc-500")} />
+                            <span className="hidden sm:inline">{tab.label}</span>
+                            <span className="sm:hidden">{tab.id.toUpperCase()}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* TWO-COLUMN MARKETPLACE CONTAINER */}
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                      
+                      {/* LEFT COLUMN: THE SELECTION GRID */}
+                      <div className="lg:col-span-7 space-y-4">
+                        {/* Rarity filter bar (Only for avatars tab) */}
+                        {cosmeticTab === 'avatars' && (
+                          <div className="flex flex-wrap gap-1 bg-zinc-900/50 p-1 rounded border border-zinc-900">
+                            {(['All', 'Common', 'Uncommon', 'Rare', 'Epic', 'Legendary'] as const).map((tier) => (
+                              <button
+                                key={tier}
+                                id={`filter-btn-${tier}`}
+                                onClick={() => setRarityFilter(tier)}
+                                className={cn(
+                                  "px-2 py-1 text-[9px] font-bold uppercase transition-colors rounded-none",
+                                  rarityFilter === tier
+                                    ? "bg-brand-teal text-brand-black"
+                                    : "text-zinc-400 hover:bg-zinc-805 hover:text-white"
+                                )}
+                              >
+                                {tier}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Rendering Avatars Portraits */}
+                        {cosmeticTab === 'avatars' && (
+                          <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 bg-zinc-900/20 p-3 border border-zinc-900 max-h-[360px] overflow-y-auto">
+                            {AVATAR_COSMETICS.filter(a => rarityFilter === 'All' || a.rarity === rarityFilter).map((avatar) => {
+                              const isSelected = selectedCosmeticId === avatar.id;
+                              const isOwned = (user?.ownedAvatars || ['common_1', 'common_2', 'common_3']).includes(avatar.id) || avatar.rarity === 'Common';
+                              const isEquipped = (user?.equippedAvatarId || 'common_1') === avatar.id;
+                              
+                              const borderStyle = 
+                                avatar.rarity === 'Legendary' ? 'border-amber-500 shadow-[0_0_8px_rgba(251,191,36,0.25)]' :
+                                avatar.rarity === 'Epic' ? 'border-purple-500 shadow-[0_0_6px_rgba(168,85,247,0.25)]' :
+                                avatar.rarity === 'Rare' ? 'border-blue-500' :
+                                avatar.rarity === 'Uncommon' ? 'border-green-500' :
+                                'border-zinc-700';
+
+                              return (
+                                <button
+                                  key={avatar.id}
+                                  id={`avatar-card-${avatar.id}`}
+                                  onClick={() => {
+                                    setSelectedCosmeticId(avatar.id);
+                                    setCosmeticErrorMsg(null);
+                                  }}
+                                  className={cn(
+                                    "p-2 bg-zinc-900 border-2 rounded transition-all flex flex-col items-center gap-2 group relative overflow-hidden",
+                                    isSelected ? "border-brand-teal bg-zinc-850 scale-[1.03] shadow-lg" : borderStyle,
+                                    "hover:bg-zinc-850"
+                                  )}
+                                >
+                                  {/* Custom miniature backgrounds */}
+                                  <div className="w-12 h-12 rounded-none bg-zinc-800 overflow-hidden flex items-center justify-center relative">
+                                    <img
+                                      src={`https://api.dicebear.com/7.x/${avatar.style}/svg?seed=${avatar.seed}`}
+                                      alt={avatar.name}
+                                      className="w-full h-full object-cover"
+                                      referrerPolicy="no-referrer"
+                                    />
+                                    {isEquipped && (
+                                      <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                                        <span className="text-[8px] font-black uppercase text-brand-teal bg-zinc-950 px-1 py-0.5 border border-brand-teal">ACTIVE</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="text-center w-full">
+                                    <p className="text-[9px] font-extrabold truncate w-full">{avatar.name}</p>
+                                    <div className="flex items-center justify-center mt-1">
+                                      {isOwned ? (
+                                        <span className="text-[7px] text-zinc-500 uppercase font-black">Owned</span>
+                                      ) : (
+                                        <div className="flex items-center gap-0.5 text-[8px] font-bold text-amber-400">
+                                          <Coins size={8} />
+                                          <span>{avatar.price}</span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {/* Rendering Borders / Frames */}
+                        {cosmeticTab === 'frames' && (
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 bg-zinc-900/20 p-3 border border-zinc-900 max-h-[360px] overflow-y-auto">
+                            {FRAME_COSMETICS.map((frame) => {
+                              const isSelected = selectedCosmeticId === frame.id;
+                              const isOwned = (user?.ownedFrames || ['frame_none']).includes(frame.id) || frame.price === 0;
+                              const isEquipped = (user?.equippedFrameId || 'frame_none') === frame.id;
+
+                              return (
+                                <button
+                                  key={frame.id}
+                                  id={`frame-card-${frame.id}`}
+                                  onClick={() => {
+                                    setSelectedCosmeticId(frame.id);
+                                    setCosmeticErrorMsg(null);
+                                  }}
+                                  className={cn(
+                                    "p-2 bg-zinc-900 border-2 rounded transition-all flex flex-col items-center gap-2 group",
+                                    isSelected ? "border-brand-teal bg-zinc-850 scale-102 shadow-lg" : "border-zinc-800",
+                                    "hover:bg-zinc-850"
+                                  )}
+                                >
+                                  {/* Dummy rendering of user current avatar with this frame around it */}
+                                  <div className="w-14 h-14 bg-zinc-800 rounded flex items-center justify-center relative">
+                                    <div className={cn("w-10 h-10 overflow-hidden relative flex items-center justify-center bg-brand-teal", frame.className)}>
+                                      <img
+                                        src={getUserAvatarUrl(user || {})}
+                                        alt="Preview"
+                                        className="w-full h-full object-cover"
+                                      />
+                                    </div>
+                                    {isEquipped && (
+                                      <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                                        <span className="text-[7px] font-black text-brand-teal bg-zinc-950 px-1 font-mono">EQUIPPED</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="text-center w-full">
+                                    <p className="text-[9px] font-extrabold truncate w-full">{frame.name}</p>
+                                    <div className="mt-1 flex items-center justify-center">
+                                      {isOwned ? (
+                                        <span className="text-[7px] text-zinc-500 uppercase font-black">Owned</span>
+                                      ) : (
+                                        <div className="flex items-center gap-0.5 text-[8px] font-bold text-amber-400">
+                                          <Coins size={8} />
+                                          <span>{frame.price}</span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {/* Rendering Commemorative Titles */}
+                        {cosmeticTab === 'titles' && (
+                          <div className="space-y-2 bg-zinc-900/20 p-3 border border-zinc-900 max-h-[360px] overflow-y-auto">
+                            {TITLE_COSMETICS.map((title) => {
+                              const isSelected = selectedCosmeticId === title.id;
+                              const isOwned = (user?.ownedTitles || ['title_none', 'title_common_scout']).includes(title.id) || title.price === 0;
+                              const isEquipped = (user?.equippedTitleId || 'title_none') === title.id;
+
+                              return (
+                                <button
+                                  key={title.id}
+                                  id={`title-card-${title.id}`}
+                                  onClick={() => {
+                                    setSelectedCosmeticId(title.id);
+                                    setCosmeticErrorMsg(null);
+                                  }}
+                                  className={cn(
+                                    "p-3 bg-zinc-900 border border-zinc-800 text-left w-full transition-all flex items-center justify-between group",
+                                    isSelected ? "border-brand-teal bg-zinc-850 shadow-md" : "border-zinc-800 hover:border-zinc-700 hover:bg-zinc-850"
+                                  )}
+                                >
+                                  <div className="flex-1 min-w-0 pr-3">
+                                    <div className="flex items-center gap-3">
+                                      <p className="text-xs font-black uppercase text-white truncate">{title.name}</p>
+                                      {title.id !== 'title_none' && (
+                                        <span className={cn("px-1.5 py-0.5 text-[8px] uppercase font-mono font-bold whitespace-nowrap", title.className)}>
+                                          Display Render
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-[10px] text-zinc-500 max-w-sm font-mono mt-1">{title.description}</p>
+                                  </div>
+                                  <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+                                    {isEquipped ? (
+                                      <span className="text-[8px] font-bold text-brand-teal border border-brand-teal/40 bg-brand-teal/5 px-2 py-0.5 uppercase tracking-wide">ACTIVE</span>
+                                    ) : isOwned ? (
+                                      <span className="text-[8px] text-zinc-500 font-bold uppercase py-0.5">Owned</span>
+                                    ) : (
+                                      <div className="flex items-center gap-1 text-[10px] font-extrabold text-amber-400 bg-zinc-950 px-2 py-0.5 rounded border border-zinc-800">
+                                        <Coins size={10} />
+                                        <span>{title.price}</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* RIGHT COLUMN: DETAILED COSMETIC INSPECT AND CONTROL PANEL */}
+                      <div className="lg:col-span-5 bg-zinc-900 border border-zinc-800 rounded p-4 flex flex-col justify-between">
+                        {(() => {
+                          // Find item properties based on current selection
+                          let item: any = null;
+                          let displayType = '';
+                          
+                          if (cosmeticTab === 'avatars') {
+                            item = AVATAR_COSMETICS.find(a => a.id === selectedCosmeticId) || AVATAR_COSMETICS[0];
+                            displayType = 'Avatar Portrait';
+                          } else if (cosmeticTab === 'frames') {
+                            item = FRAME_COSMETICS.find(f => f.id === selectedCosmeticId) || FRAME_COSMETICS[0];
+                            displayType = 'Profile Border';
+                          } else if (cosmeticTab === 'titles') {
+                            item = TITLE_COSMETICS.find(t => t.id === selectedCosmeticId) || TITLE_COSMETICS[0];
+                            displayType = 'Commemorative Title';
+                          }
+
+                          if (!item) {
+                            return <div className="text-center py-6 text-zinc-500 text-[10px] uppercase font-mono">Selector Empty</div>;
+                          }
+
+                          // Calculation attributes
+                          const isOwned = 
+                            cosmeticTab === 'avatars' 
+                              ? (user?.ownedAvatars || ['common_1', 'common_2', 'common_3']).includes(item.id) || item.rarity === 'Common'
+                              : cosmeticTab === 'frames'
+                                ? (user?.ownedFrames || ['frame_none']).includes(item.id) || item.price === 0
+                                : (user?.ownedTitles || ['title_none', 'title_common_scout']).includes(item.id) || item.price === 0;
+
+                          const isEquipped = 
+                            cosmeticTab === 'avatars'
+                              ? (user?.equippedAvatarId || 'common_1') === item.id
+                              : cosmeticTab === 'frames'
+                                ? (user?.equippedFrameId || 'frame_none') === item.id
+                                : (user?.equippedTitleId || 'title_none') === item.id;
+
+                          const rarityColor = 
+                            item.rarity === 'Legendary' ? 'text-amber-400 bg-amber-500/10 border-amber-500/30' :
+                            item.rarity === 'Epic' ? 'text-purple-400 bg-purple-500/10 border-purple-500/30' :
+                            item.rarity === 'Rare' ? 'text-blue-400 bg-blue-500/10 border-blue-500/30' :
+                            item.rarity === 'Uncommon' ? 'text-green-400 bg-green-500/10 border-green-500/30' :
+                            'text-zinc-400 bg-zinc-500/14 border-zinc-500/20';
+
+                          return (
+                            <div className="flex flex-col h-full justify-between gap-6" id="cosmetic-inspector">
+                              <div className="space-y-4">
+                                <span className="text-[8px] font-black bg-zinc-950 font-mono text-brand-teal px-2 py-0.5 border border-zinc-805 tracking-widest uppercase">
+                                  INSPECTION PANEL & LIVE FORECAST
+                                </span>
+
+                                {/* Display preview window */}
+                                <div className="p-4 bg-zinc-950 rounded border border-zinc-805 flex flex-col items-center justify-center relative overflow-hidden">
+                                  
+                                  {/* Shimmer overlay for Legendary items */}
+                                  {item.rarity === 'Legendary' && (
+                                    <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-amber-500 via-yellow-300 to-amber-500 animate-pulse pointer-events-none" />
+                                  )}
+
+                                  {cosmeticTab === 'avatars' && (
+                                    <div className="relative">
+                                      {item.rarity === 'Legendary' && (
+                                        <div className="absolute -inset-2 bg-gradient-to-r from-amber-400 via-yellow-500 to-amber-300 pointer-events-none rounded opacity-30 animate-pulse blur-xs" />
+                                      )}
+                                      {item.rarity === 'Epic' && (
+                                        <div className="absolute -inset-1.5 bg-purple-500 pointer-events-none rounded opacity-25 blur-xs" />
+                                      )}
+                                      <div className="w-24 h-24 bg-zinc-850 rounded border-2 border-zinc-700 overflow-hidden relative flex items-center justify-center">
+                                        <img
+                                          src={`https://api.dicebear.com/7.x/${item.style}/svg?seed=${item.seed}`}
+                                          alt={item.name}
+                                          className="w-full h-full object-cover z-10"
+                                          referrerPolicy="no-referrer"
+                                        />
+                                        
+                                        {/* Golden floating star animations */}
+                                        {item.rarity === 'Legendary' && (
+                                          <div className="absolute inset-0 z-20 pointer-events-none overflow-hidden">
+                                            <div className="absolute bottom-1 left-2 w-1 h-1 bg-yellow-250 rounded-full" style={{ animation: 'float-particle 1.8s infinite ease-out' }} />
+                                            <div className="absolute bottom-1 right-2 w-1 bg-amber-300 rounded-full" style={{ animation: 'float-particle 2.2s infinite ease-out', animationDelay: '0.4s' }} />
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {cosmeticTab === 'frames' && (
+                                    <div className="w-24 h-24 bg-zinc-850 rounded flex items-center justify-center relative">
+                                      <div className={cn("w-16 h-16 overflow-hidden bg-brand-teal relative flex items-center justify-center", item.className)}>
+                                        <img src={getUserAvatarUrl(user || {})} alt="Borders demo" className="w-full h-full object-cover" />
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {cosmeticTab === 'titles' && (
+                                    <div className="py-5 text-center w-full">
+                                      <p className="text-[8px] text-zinc-500 uppercase tracking-widest font-mono mb-2">Display Output</p>
+                                      <p className="text-white text-xs font-black tracking-tight mb-2">{user?.name}</p>
+                                      {item.id !== 'title_none' ? (
+                                        <span className={cn("px-2.5 py-1 text-[10px] uppercase font-mono font-extrabold tracking-widest", item.className)}>
+                                          {item.name}
+                                        </span>
+                                      ) : (
+                                        <span className="text-zinc-650 text-[10px] italic">No active title</span>
+                                      )}
+                                    </div>
+                                  )}
+
+                                  <div className="mt-3 text-center">
+                                    <h5 className="text-sm font-black uppercase text-white font-display">{item.name}</h5>
+                                    <span className={cn("inline-block mt-1.5 px-2.5 py-0.5 border text-[9px] uppercase font-mono font-extrabold tracking-widest rounded-none", rarityColor)}>
+                                      {item.rarity} {displayType}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="space-y-1.5">
+                                  <p className="text-[10px] font-bold text-zinc-300 uppercase tracking-wider font-mono">SPECIFICATION DETAIL</p>
+                                  <p className="text-[11px] text-zinc-400 leading-relaxed font-sans">{item.description}</p>
+                                </div>
+
+                                {item.lore && (
+                                  <div className="bg-zinc-950 p-2.5 border border-zinc-900 rounded-sm">
+                                    <p className="text-[7px] text-zinc-500 uppercase font-black font-mono tracking-widest mb-1">COSMIC LORE</p>
+                                    <p className="text-[10px] text-brand-teal font-serif italic leading-relaxed">"{item.lore}"</p>
+                                  </div>
+                                )}
+
+                                {item.visualEffects && item.visualEffects.length > 0 && (
+                                  <div>
+                                    <p className="text-[8px] text-zinc-500 uppercase font-black font-mono tracking-widest mb-1.5">VISUAL EFFECTS UNLOCKED</p>
+                                    <div className="flex flex-wrap gap-1">
+                                      {item.visualEffects.map((effect: string, fIdx: number) => (
+                                        <span key={fIdx} className="text-[8px] text-zinc-400 bg-zinc-950 border border-zinc-800 px-1.5 py-0.5 rounded-none font-mono">
+                                          ✦ {effect}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Button Controls */}
+                              <div className="pt-4 border-t border-zinc-800">
+                                {isEquipped ? (
+                                  <button
+                                    disabled
+                                    className="w-full py-3 bg-zinc-800/60 text-zinc-550 border border-zinc-705 text-xs font-black uppercase tracking-widest rounded-none select-none flex items-center justify-center gap-1.5"
+                                  >
+                                    <Check size={14} className="text-zinc-500" /> ACTIVE EQUIPPED
+                                  </button>
+                                ) : isOwned ? (
+                                  <button
+                                    onClick={async () => {
+                                      if (cosmeticTab === 'avatars') await equipAvatar(item.id);
+                                      else if (cosmeticTab === 'frames') await equipFrame(item.id);
+                                      else if (cosmeticTab === 'titles') await equipTitle(item.id);
+                                    }}
+                                    className="w-full py-3 bg-brand-teal text-brand-black hover:bg-emerald-400 font-black text-xs uppercase tracking-widest border-2 border-brand-black active:translate-y-0.5 transition-all text-center rounded-none shadow-brutal-xs"
+                                  >
+                                    EQUIP TO PROFILE CARD
+                                  </button>
+                                ) : (
+                                  <button
+                                    disabled={isBuyingInProgress}
+                                    onClick={async () => {
+                                      setIsBuyingInProgress(true);
+                                      try {
+                                        if (cosmeticTab === 'avatars') await buyAvatar(item);
+                                        else if (cosmeticTab === 'frames') await buyFrame(item);
+                                        else if (cosmeticTab === 'titles') await buyTitle(item);
+                                      } finally {
+                                        setIsBuyingInProgress(false);
+                                      }
+                                    }}
+                                    className="w-full py-3 bg-amber-500 hover:bg-amber-400 text-brand-black font-black text-xs uppercase tracking-widest border-2 border-brand-black active:translate-y-0.5 transition-all text-center rounded-none shadow-brutal-xs flex items-center justify-center gap-1.5"
+                                  >
+                                    <ShoppingBag size={14} className="text-brand-black" />
+                                    <span>UNLOCK & BURN {item.price} TOKENS</span>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
                   </div>
+
 
                   {/* Online Hours Selector */}
                   <div className="space-y-3">
@@ -1428,7 +2112,7 @@ export default function Profile({
                             Open
                           </label>
                           <select
-                            className="w-full bg-[#d8f1e9] border border-zinc-700 text-[#060606] text-xs p-2 h-10"
+                            className="w-full bg-[#dadcd8] dark:bg-zinc-800 border border-zinc-700 text-[#060606] dark:text-white text-xs p-2 h-10"
                             value={
                               profileEditData.onlineHours
                                 .split("|")[1]
@@ -1462,7 +2146,7 @@ export default function Profile({
                             Close
                           </label>
                           <select
-                            className="w-full bg-[#d8f1e9] border border-zinc-700 text-[#0d0d0d] text-xs p-2 h-10"
+                            className="w-full bg-[#dadcd8] dark:bg-zinc-800 border border-zinc-700 text-[#0d0d0d] dark:text-white text-xs p-2 h-10"
                             value={
                               profileEditData.onlineHours
                                 .split("|")[1]
@@ -1559,7 +2243,7 @@ export default function Profile({
                               setSuggestions([]);
                             }
                           }}
-                          className="brutalist-input h-12 pl-4 text-xs bg-zinc-800 border-zinc-700 text-white w-full placeholder:text-zinc-500"
+                          className="brutalist-input h-12 pl-4 text-xs bg-[#dadcd8] dark:bg-zinc-800 border-zinc-700 text-brand-black dark:text-white w-full placeholder:text-zinc-500 dark:placeholder:text-zinc-400"
                           placeholder="Type & press Enter to add..."
                         />
                         {suggestions.length > 0 && (
@@ -1650,7 +2334,7 @@ export default function Profile({
                             linkedin: e.target.value,
                           })
                         }
-                        className="brutalist-input h-12 pl-10 text-xs bg-zinc-900 border-zinc-800 text-white w-full placeholder:text-zinc-600"
+                        className="brutalist-input h-12 pl-10 text-xs bg-[#dadcd8] dark:bg-zinc-800 border-zinc-800 dark:border-zinc-700 text-brand-black dark:text-white w-full placeholder:text-zinc-500 dark:placeholder:text-zinc-400"
                         placeholder="linkedin.com/in/username"
                       />
                     </div>
@@ -1798,6 +2482,349 @@ export default function Profile({
                 </button>
               </div>
             </>
+          )}
+
+          {activeView === "Preferences" && (
+            <div className="bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 shadow-brutal-sm flex flex-col gap-6 p-4">
+              <div className="divide-y-2 divide-zinc-200 dark:divide-zinc-800 flex flex-col gap-6">
+              {/* Sub: Display */}
+              <div className="flex flex-col gap-3">
+                <h4 className="text-xs font-black uppercase tracking-wider text-zinc-500 flex items-center gap-1.5 border-l-4 border-brand-teal pl-2">
+                  <Eye size={12} /> Display
+                </h4>
+                <div className="flex justify-between items-center py-1">
+                  <span className="text-xs font-bold uppercase tracking-tight text-neutral-600 dark:text-neutral-300">Theme</span>
+                  <div className="flex border-2 border-brand-black dark:border-zinc-750 p-0.5 bg-neutral-100 dark:bg-neutral-800 rounded">
+                    {(["LIGHT", "DARK", "SYSTEM"] as const).map((t) => {
+                      const isSelected = (user.preferences?.theme || "system").toUpperCase() === t;
+                      return (
+                        <button
+                          key={t}
+                          onClick={() => handleUpdatePreference({ theme: t.toLowerCase() as any })}
+                          className={cn(
+                            "px-3 py-1 font-display text-[9px] font-black uppercase tracking-widest border border-transparent rounded transition-all",
+                            isSelected 
+                              ? "bg-brand-teal text-brand-black font-black" 
+                              : "text-zinc-500 hover:text-brand-black dark:hover:text-white"
+                          )}
+                        >
+                          {t}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Sub: Notifications */}
+              <div className="flex flex-col gap-3 pt-4">
+                <h4 className="text-xs font-black uppercase tracking-wider text-zinc-500 flex items-center gap-1.5 border-l-4 border-brand-teal pl-2">
+                  <Bell size={12} /> Notifications
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {[
+                    { key: "bidReceived", label: "Bid Received" },
+                    { key: "listingApproved", label: "Listing Approved" },
+                    { key: "inspectionConfirmed", label: "Inspection Confirmed" },
+                    { key: "messageReceived", label: "Message Received" },
+                    { key: "dealStatusUpdate", label: "Deal Status Update" },
+                    { key: "marketingUpdates", label: "Marketing Updates" },
+                  ].map(({ key, label }) => {
+                    const currentNotifications = user.preferences?.notifications || DEFAULT_PREFERENCES.notifications;
+                    const isChecked = !!(currentNotifications as any)[key];
+                    return (
+                      <div key={key} className="flex justify-between items-center py-1">
+                        <span className="text-xs font-medium text-neutral-600 dark:text-neutral-300">{label}</span>
+                        <button
+                          onClick={() => {
+                            const updatedNotifications = {
+                              ...currentNotifications,
+                              [key]: !isChecked
+                            };
+                            handleUpdatePreference({ notifications: updatedNotifications });
+                          }}
+                          className={cn(
+                            "w-10 h-5 border-2 border-brand-black dark:border-zinc-700 transition-all flex items-center shadow-brutal-xs rounded-full p-0.5",
+                            isChecked ? "bg-brand-teal" : "bg-zinc-200 dark:bg-zinc-700"
+                          )}
+                        >
+                          <div className={cn(
+                            "w-3 h-3 bg-white border border-brand-black dark:border-zinc-700 transition-transform rounded-full",
+                            isChecked ? "translate-x-5" : "translate-x-0"
+                          )} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Sub: Localization & Defaults */}
+              <div className="flex flex-col gap-4 pt-4">
+                <h4 className="text-xs font-black uppercase tracking-wider text-zinc-500 flex items-center gap-1.5 border-l-4 border-brand-teal pl-2">
+                  <Globe size={12} /> Localization & Default Views
+                </h4>
+                
+                {/* Language */}
+                <div className="flex justify-between items-center py-1 border-b border-dashed border-zinc-100 dark:border-zinc-800">
+                  <span className="text-xs font-bold uppercase tracking-tight text-neutral-600 dark:text-neutral-300">Language</span>
+                  <span className="px-3 py-1 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded text-[10px] font-mono font-black text-zinc-500">
+                    English (en)
+                  </span>
+                </div>
+
+                {/* Currency */}
+                <div className="flex flex-col gap-2 py-1 border-b border-dashed border-zinc-100 dark:border-zinc-800">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-bold uppercase tracking-tight text-neutral-600 dark:text-neutral-300">Currency</span>
+                    <div className="flex border-2 border-brand-black dark:border-zinc-750 p-0.5 bg-neutral-100 dark:bg-neutral-800 rounded">
+                      {(["NGN", "USD", "GBP"] as const).map((curr) => {
+                        const isSelected = (user.preferences?.currency || "NGN").toUpperCase() === curr;
+                        return (
+                          <button
+                            key={curr}
+                            onClick={() => handleUpdatePreference({ currency: curr })}
+                            className={cn(
+                              "px-3 py-1 font-display text-[9px] font-black uppercase tracking-widest border border-transparent rounded transition-all",
+                              isSelected 
+                                ? "bg-brand-teal text-brand-black font-black" 
+                                : "text-zinc-500 hover:text-brand-black dark:hover:text-white"
+                            )}
+                          >
+                            {curr}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <p className="text-[10px] italic text-zinc-400 mt-1 dark:text-zinc-550 leading-none">
+                    Exchange rates are indicative.
+                  </p>
+                </div>
+
+                {/* Default SearchView */}
+                <div className="flex justify-between items-center py-1 border-b border-dashed border-zinc-100 dark:border-zinc-800">
+                  <span className="text-xs font-bold uppercase tracking-tight text-neutral-600 dark:text-neutral-300">Default SearchView</span>
+                  <div className="flex border-2 border-brand-black dark:border-zinc-750 p-0.5 bg-neutral-100 dark:bg-neutral-800 rounded">
+                    {(["LIST", "MAP"] as const).map((v) => {
+                      const isSelected = (user.preferences?.defaultSearchView || "list").toUpperCase() === v;
+                      return (
+                        <button
+                          key={v}
+                          onClick={() => handleUpdatePreference({ defaultSearchView: v.toLowerCase() as any })}
+                          className={cn(
+                            "px-3 py-1 font-display text-[9px] font-black uppercase tracking-widest border border-transparent rounded transition-all",
+                            isSelected 
+                              ? "bg-brand-teal text-brand-black font-black" 
+                              : "text-zinc-500 hover:text-brand-black dark:hover:text-white"
+                          )}
+                        >
+                          {v}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Default Listing Type */}
+                <div className="flex justify-between items-center py-1">
+                  <span className="text-xs font-bold uppercase tracking-tight text-neutral-600 dark:text-neutral-300">Default Listing Type</span>
+                  <div className="flex border-2 border-brand-black dark:border-zinc-750 p-0.5 bg-neutral-100 dark:bg-neutral-800 rounded">
+                    {(["ALL", "SALE", "RENT"] as const).map((lt) => {
+                      const isSelected = (user.preferences?.defaultListingType || "All").toUpperCase() === lt;
+                      return (
+                        <button
+                          key={lt}
+                          onClick={() => {
+                            const capitalizedValue = lt === "ALL" ? "All" : lt === "SALE" ? "Sale" : "Rent";
+                            handleUpdatePreference({ defaultListingType: capitalizedValue as any });
+                          }}
+                          className={cn(
+                            "px-3 py-1 font-display text-[9px] font-black uppercase tracking-widest border border-transparent rounded transition-all",
+                            isSelected 
+                              ? "bg-brand-teal text-brand-black font-black" 
+                              : "text-zinc-500 hover:text-brand-black dark:hover:text-white"
+                          )}
+                        >
+                          {lt}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            
+              </div>
+            </div>
+          )}
+          {activeView === "Account Settings" && (
+            <div className="bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 shadow-brutal-sm flex flex-col gap-6 p-4">
+              <div className="divide-y-2 divide-zinc-200 dark:divide-zinc-800 flex flex-col gap-6">
+              {/* Sub: Security */}
+              <div className="flex flex-col gap-3 text-left">
+                <h4 className="text-xs font-black uppercase tracking-wider text-zinc-500 flex items-center gap-1.5 border-l-4 border-brand-red pl-2">
+                  <Lock size={12} /> Security
+                </h4>
+                <div className="flex justify-between items-center py-1">
+                  <div className="flex flex-col text-left">
+                    <span className="text-xs font-bold uppercase tracking-tight text-neutral-600 dark:text-neutral-300">Change Password</span>
+                    <span className="text-[10px] text-zinc-400 dark:text-zinc-500">Rotate credential verification passcodes</span>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setIsPasswordToastVisible(true);
+                      setTimeout(() => setIsPasswordToastVisible(false), 5000);
+                    }}
+                    className="bg-zinc-100 dark:bg-zinc-800 border-2 border-brand-black dark:border-zinc-700 hover:bg-brand-teal hover:text-brand-black px-4 py-1.5 font-display text-[9px] font-black uppercase tracking-widest transition-all shadow-brutal-xs active:translate-y-0.5 text-brand-black dark:text-white font-black"
+                  >
+                    CHANGE PASSWORD
+                  </button>
+                </div>
+                {isPasswordToastVisible && (
+                  <div className="p-3 bg-neutral-950 text-brand-red border border-brand-red font-mono text-[10px] uppercase text-left leading-relaxed">
+                    Secure credential rotation system offline. Please contact administrator.
+                  </div>
+                )}
+              </div>
+
+              {/* Sub: Privacy */}
+              <div className="flex flex-col gap-4 pt-4">
+                <h4 className="text-xs font-black uppercase tracking-wider text-zinc-500 flex items-center gap-1.5 border-l-4 border-brand-red pl-2">
+                  <ShieldCheck size={12} /> Privacy & Linked Accounts
+                </h4>
+                
+                {/* Linked accounts */}
+                <div className="flex justify-between items-center py-1 border-b border-dashed border-zinc-200 dark:border-zinc-800">
+                  <span className="text-xs font-bold uppercase tracking-tight text-neutral-600 dark:text-neutral-300">Linked Accounts</span>
+                  <span className="px-3 py-1 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded text-[10px] font-mono font-black text-zinc-500">
+                    {user.firstName === "Google" || user.email?.includes("gmail.com") 
+                      ? "Linked to Google" 
+                      : user.firstName === "Facebook" || user.email?.includes("facebook.com")
+                      ? "Linked to Facebook"
+                      : "Credential Email Setup"}
+                  </span>
+                </div>
+
+                {/* Active Sessions */}
+                <div className="flex flex-col gap-3 py-1 text-left">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-bold uppercase tracking-tight text-neutral-600 dark:text-neutral-300">Active Sessions</span>
+                    <button
+                      onClick={() => {
+                        setActiveSessions([ { device: 'Chrome on MacOS (This device)', active: true, location: 'Lagos, Nigeria' } ]);
+                        setActiveSessionsAlert("All other sessions have been terminated.");
+                        setTimeout(() => setActiveSessionsAlert(null), 4000);
+                      }}
+                      className="bg-brand-red hover:bg-red-600 text-white px-2.5 py-1 font-display text-[8px] font-black uppercase tracking-widest transition-all shadow-brutal-xs active:translate-y-0.5 font-black"
+                    >
+                      TERMINATE OTHERS
+                    </button>
+                  </div>
+                  
+                  {activeSessionsAlert && (
+                    <div className="p-2 border border-brand-teal text-brand-teal bg-neutral-950 font-mono text-[9px] uppercase leading-none">
+                      {activeSessionsAlert}
+                    </div>
+                  )}
+
+                  <ul className="space-y-1.5">
+                    {activeSessions.map((session, idx) => (
+                      <li key={idx} className="flex justify-between items-center text-[10px] font-mono text-zinc-500 bg-neutral-50 dark:bg-neutral-800 p-2 border border-zinc-200 dark:border-zinc-700">
+                        <div className="flex items-center gap-1.5">
+                          <span className={cn("w-2 h-2 rounded-full", session.active ? "bg-brand-teal animate-pulse" : "bg-zinc-400")} />
+                          <span>{session.device}</span>
+                        </div>
+                        <span>{session.location}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+
+              {/* Sub: Danger Zone */}
+              <div className="flex flex-col gap-4 pt-4 border-t-2 border-brand-red/30">
+                <button 
+                  onClick={() => setIsDangerZoneOpen(!isDangerZoneOpen)}
+                  className="w-full flex items-center justify-between text-left group hover:bg-red-500/5 p-2 -ml-2 rounded transition-colors"
+                >
+                  <h4 className="text-xs font-black uppercase tracking-wider text-brand-red flex items-center gap-1.5 border-l-4 border-brand-red pl-2">
+                    <AlertOctagon size={12} /> Danger Zone
+                  </h4>
+                  <ChevronDown size={16} className={cn("text-brand-red transition-transform duration-200", isDangerZoneOpen ? "rotate-180" : "rotate-0")} />
+                </button>
+                
+                <AnimatePresence>
+                  {isDangerZoneOpen && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="overflow-hidden flex flex-col gap-4"
+                    >
+                      {/* Profile Visibility */}
+                      <div className="flex justify-between items-center py-1">
+                        <div className="flex flex-col text-left">
+                          <span className="text-xs font-bold uppercase tracking-tight text-neutral-600 dark:text-neutral-300">Profile Visibility</span>
+                          <span className="text-[10px] text-zinc-400 dark:text-zinc-500">Toggle public indexing of your professional bio</span>
+                        </div>
+                        <button
+                          onClick={() => {
+                            updateUser({ profileVisible: user.profileVisible === false ? true : false });
+                          }}
+                          className={cn(
+                            "w-10 h-5 border-2 border-brand-black dark:border-zinc-700 transition-all flex items-center shadow-brutal-xs rounded-full p-0.5",
+                            user.profileVisible !== false ? "bg-brand-teal" : "bg-zinc-200 dark:bg-zinc-700"
+                          )}
+                        >
+                          <div className={cn(
+                            "w-3 h-3 bg-white border border-brand-black dark:border-zinc-700 transition-transform rounded-full",
+                            user.profileVisible !== false ? "translate-x-5" : "translate-x-0"
+                          )} />
+                        </button>
+                      </div>
+
+                      {/* Data Usage */}
+                      <div className="flex flex-col gap-3 py-1 text-left">
+                        <span className="text-xs font-bold uppercase tracking-tight text-neutral-600 dark:text-neutral-300">Data Collected</span>
+                        <ul className="list-disc pl-4 space-y-1 text-[10px] font-mono text-zinc-500 pb-1">
+                          <li>Device and operating system specifications</li>
+                          <li>Functional and analytics session cookies allowed</li>
+                          <li>Inspection geocoordinate logs</li>
+                          <li>Escrow ledger transaction logging history</li>
+                        </ul>
+                        <button
+                          onClick={() => {
+                            const jsonStr = JSON.stringify(user, null, 2);
+                            const blob = new Blob([jsonStr], { type: 'application/json' });
+                            const url = URL.createObjectURL(blob);
+                            const link = document.createElement('a');
+                            link.href = url;
+                            link.download = `profile_export_${user.id || 'export'}.json`;
+                            link.click();
+                            URL.revokeObjectURL(url);
+                          }}
+                          className="w-full bg-zinc-100 dark:bg-zinc-800 hover:bg-neutral-200 border-2 border-dashed border-brand-black dark:border-zinc-700 p-2 font-mono text-[9px] font-black uppercase text-center text-brand-black dark:text-white font-black"
+                        >
+                          EXPORT MY PROFILE PERSIST DETAIL PORTFOLIO
+                        </button>
+                      </div>
+
+                      {/* Account Deletion */}
+                      <div className="py-1">
+                        <button
+                          onClick={() => setIsEmailModalOpen(true)}
+                          className="w-full bg-brand-red hover:bg-red-600 text-white py-3 border-2 border-brand-black font-display font-black uppercase tracking-wider text-xs shadow-aggressive active:translate-y-0.5 font-black"
+                        >
+                          TERMINATE MY ACCOUNT PROFILE & CLOSE ESCROW WALLET
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            
+              </div>
+            </div>
           )}
           {activeView === "Admin Panel" && (
             <div className="flex flex-col gap-6">
@@ -1963,18 +2990,39 @@ export default function Profile({
 
         <div className="flex items-center gap-5 relative z-10">
           <div className="relative group">
-            <div className="w-24 h-24 bg-brand-teal border-4 border-brand-black dark:border-zinc-700 overflow-hidden shadow-brutal-sm group-hover:-translate-x-1 group-hover:-translate-y-1 transition-all">
-              <img
-                src={getUserAvatarUrl(user)}
-                alt="Profile"
-                className="w-full h-full"
-                referrerPolicy="no-referrer"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src =
-                    `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=2bdctb&color=000`;
-                }}
-              />
-            </div>
+            {(() => {
+              const equippedFrame = FRAME_COSMETICS.find(f => f.id === user?.equippedFrameId);
+              const frameClass = equippedFrame && equippedFrame.id !== 'frame_none'
+                ? equippedFrame.className
+                : "border-4 border-brand-black dark:border-zinc-700 shadow-brutal-sm";
+              const activeAvatarId = user?.equippedAvatarId || 'common_1';
+              const matchAv = AVATAR_COSMETICS.find(a => a.id === activeAvatarId);
+              const isLegendary = matchAv?.rarity === 'Legendary';
+              const isEpic = matchAv?.rarity === 'Epic';
+
+              return (
+                <div className="relative">
+                  {isLegendary && (
+                    <div className="absolute -inset-1 bg-amber-400 rounded-sm opacity-50 blur-sm animate-pulse pointer-events-none" />
+                  )}
+                  {isEpic && (
+                    <div className="absolute -inset-1 bg-purple-500 rounded-sm opacity-35 blur-xs pointer-events-none animate-pulse" />
+                  )}
+                  <div className={cn("w-24 h-24 bg-zinc-800 overflow-hidden relative flex items-center justify-center transition-all", frameClass)}>
+                    <img
+                      src={getUserAvatarUrl(user)}
+                      alt="Profile"
+                      className="w-full h-full object-cover"
+                      referrerPolicy="no-referrer"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src =
+                          `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=2bdctb&color=000`;
+                      }}
+                    />
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           <div className="flex-1">
@@ -2008,6 +3056,22 @@ export default function Profile({
                   </div>
                 </div>
                 <div className="mb-3">{renderStars(user.rating || 4.5)}</div>
+                
+                {/* Equipped Title Display */}
+                {(() => {
+                  const activeTitle = TITLE_COSMETICS.find(t => t.id === user?.equippedTitleId);
+                  if (activeTitle && activeTitle.id !== 'title_none') {
+                    return (
+                      <div className="mb-2">
+                        <span className={cn("px-2.5 py-0.5 rounded text-[9px] uppercase font-mono tracking-widest font-extrabold inline-block", activeTitle.className)}>
+                          {activeTitle.name}
+                        </span>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+
                 {renderRoleTierBadges(user)}
                 <div className="flex flex-wrap gap-2 mb-2">
                   <span
@@ -2353,31 +3417,16 @@ export default function Profile({
       )}
 
       {/* Quick Actions Grid */}
-      <section
-        className={cn(
-          "grid gap-4",
-          user.role === "Seller" ? "grid-cols-2" : "grid-cols-1",
-        )}
-      >
-        {user.role === "Seller" && (
+      {user.role === "Seller" && (
+        <section className="grid gap-4 grid-cols-1">
           <ActionButton
             icon={<PlusCircle className="text-brand-red" />}
             label="List Property"
             subLabel="Submit property request"
             onClick={() => handleAction("Request Listing")}
           />
-        )}
-        <ActionButton
-          icon={<Edit3 className="text-brand-teal" />}
-          label="Customize Profile"
-          subLabel={
-            user.role === "Agent"
-              ? "Agent Resume & Info"
-              : "Personal Preferences & Info"
-          }
-          onClick={() => handleAction("Customize Profile")}
-        />
-      </section>
+        </section>
+      )}
 
       {/* List Options */}
       <section className="flex flex-col gap-2">
@@ -2385,6 +3434,11 @@ export default function Profile({
           Personal Management
         </h3>
         <div className="brutalist-card p-2 flex flex-col divide-y-2 divide-zinc-100 dark:divide-zinc-800">
+          <ListOption
+            icon={<Edit3 size={18} />}
+            label="Customize Profile"
+            onClick={() => handleAction("Customize Profile")}
+          />
           {user.role !== "Buyer" && (
             <ListOption
               icon={<Heart size={18} />}
@@ -2449,7 +3503,12 @@ export default function Profile({
         <h3 className="text-xs font-display font-black uppercase text-zinc-400 tracking-widest pl-2">
           System
         </h3>
-        <div className="brutalist-card p-2 flex flex-col divide-y-2 divide-zinc-100">
+        <div className="brutalist-card p-2 flex flex-col divide-y-2 divide-zinc-100 dark:divide-zinc-800">
+          <ListOption
+            icon={<Sliders size={18} />}
+            label="Preferences"
+            onClick={() => handleAction("Preferences")}
+          />
           <ListOption
             icon={<Settings size={18} />}
             label="Account Settings"
@@ -2467,6 +3526,81 @@ export default function Profile({
           />
         </div>
       </section>
+
+      
+
+      {/* Account Deletion Overlay Modal */}
+      <AnimatePresence>
+        {isEmailModalOpen && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => {
+                setIsEmailModalOpen(false);
+                setDeleteConfirmEmail('');
+              }}
+              className="absolute inset-0 bg-brand-black/60 backdrop-blur-sm"
+            />
+            
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="relative w-full max-w-md bg-white dark:bg-zinc-900 border-4 border-brand-red shadow-aggressive p-6 flex flex-col gap-4 text-left z-10"
+            >
+              <div className="flex items-center gap-2 text-brand-red">
+                <AlertTriangle size={24} />
+                <h2 className="text-xl font-display font-black uppercase italic">Critical Security Authorization</h2>
+              </div>
+
+              <p className="text-xs font-bold font-mono text-zinc-600 dark:text-zinc-300 leading-relaxed uppercase bg-red-50 dark:bg-[#201010] p-3 border border-brand-red/30">
+                DANGER ZONE: If you terminate your credentials, any outstanding real estate listings, secure escrow holdings, tokens, or pending inspections will be permanently deleted with zero recovery path. To verify, type your registered email address <span className="font-black text-brand-red">{user.email}</span> below:
+              </p>
+
+              <input
+                type="email"
+                value={deleteConfirmEmail}
+                onChange={(e) => setDeleteConfirmEmail(e.target.value)}
+                placeholder={user.email}
+                className="w-full p-3 border-2 border-brand-black dark:border-zinc-700 font-mono text-xs uppercase bg-neutral-50 dark:bg-neutral-900 text-brand-black dark:text-white"
+                autoFocus
+              />
+
+              <div className="flex gap-4">
+                <button
+                  onClick={() => {
+                    setIsEmailModalOpen(false);
+                    setDeleteConfirmEmail('');
+                  }}
+                  className="flex-1 bg-zinc-100 dark:bg-zinc-800 border-2 border-brand-black dark:border-zinc-700 py-2.5 font-display text-[10px] font-black uppercase tracking-wider text-brand-black dark:text-white font-black"
+                >
+                  CANCEL REQUEST
+                </button>
+                
+                <button
+                  disabled={deleteConfirmEmail !== user.email}
+                  onClick={async () => {
+                    try {
+                      const { doc: firestoreDoc, deleteDoc } = await import("firebase/firestore");
+                      await deleteDoc(firestoreDoc(db, 'users', user.id));
+                      logout();
+                      setIsEmailModalOpen(false);
+                      setDeleteConfirmEmail('');
+                    } catch (e) {
+                      console.error("Account deletion failed", e);
+                    }
+                  }}
+                  className="flex-1 bg-brand-red text-white border-2 border-brand-black py-2.5 font-display text-[10px] font-black uppercase tracking-wider shadow-brutal-xs disabled:opacity-40 disabled:cursor-not-allowed font-black"
+                >
+                  TERMINATE
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       <div className="text-center py-4">
         <p className="text-[10px] font-black uppercase text-zinc-400 tracking-tighter">

@@ -9,13 +9,15 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigation } from '../context/NavigationContext';
 
 export default function ListPropertyFlow() {
-  const { user, updateUser, addTransaction, listingRequests } = useAuth();
+  const { user, updateUser, addTransaction, listingRequests, addListingRequest } = useAuth();
   const { handleBackToMarketplace: onBack, setIsListingFlow, setActiveTab } = useNavigation();
 
   const [showModal, setShowModal] = useState(true);
   const [hasAgreed, setHasAgreed] = useState(false);
   const [monthlyFeePaid, setMonthlyFeePaid] = useState(false);
   const [tokenError, setTokenError] = useState<string | null>(null);
+  const [submitted, setSubmitted] = useState(false);
+  const [submittedRequestTitle, setSubmittedRequestTitle] = useState('');
 
   // Check if seller has an active monthly listing
   const nowISO = new Date().toISOString();
@@ -343,6 +345,112 @@ export default function ListPropertyFlow() {
     );
   }
 
+  const handleListingSubmit = async (formData: any) => {
+    try {
+      const now = new Date().toISOString();
+      const expires = new Date(Date.now() + 30 * 86400000).toISOString();
+      
+      const pendingPaymentRaw = localStorage.getItem('realagents_pending_payment');
+      let pendingPayment = pendingPaymentRaw ? JSON.parse(pendingPaymentRaw) : null;
+      
+      const PLATFORM_COMMISSION_RATE = 5;
+      const resolvedCommission = user.commissionRate !== undefined ? user.commissionRate : PLATFORM_COMMISSION_RATE;
+      
+      // Clean and parse price
+      let cleanPrice = 0;
+      if (formData.price) {
+        cleanPrice = parseFloat(String(formData.price).replace(/[^0-9.]/g, '')) || 0;
+      }
+
+      const generatedTitle = `${formData.bedrooms} Bed ${formData.propertySubType} inside ${formData.estateName}`;
+      setSubmittedRequestTitle(generatedTitle);
+
+      const newRequest: ListingRequest = {
+        id: `req-${Date.now()}`,
+        title: generatedTitle,
+        type: formData.propertyType || 'House',
+        price: cleanPrice,
+        location: `${formData.lga || ''}, ${formData.state || ''}`,
+        status: 'Agent Bidding',
+        submittedAt: now,
+        lastUpdated: now,
+        expiresAt: expires,
+        commission: resolvedCommission,
+        acceptsDownPayment: false,
+        listingType: formData.listingType || 'Sale',
+        propertySubType: formData.propertySubType,
+        sizeSqm: parseFloat(formData.sizeSqm || '0'),
+        bedrooms: parseInt(formData.bedrooms || '0', 10),
+        bathrooms: parseInt(formData.bathrooms || '0', 10),
+        estateName: formData.estateName,
+        amenities: formData.amenities,
+        googlePinLink: formData.googlePinLink,
+        listingFeeStatus: pendingPayment?.listingFeeStatus || 'Unpaid',
+        listingFeePaidAt: pendingPayment?.monthlyFeePaidAt || '',
+        verificationFeePaid: user.verifiedPropertySeller || false,
+        verificationFeePaidAt: user.verificationFeePaidAt || '',
+        monthlyFeePaidAt: pendingPayment?.monthlyFeePaidAt || '',
+        monthlyFeeExpiresAt: pendingPayment?.monthlyFeeExpiresAt || '',
+        dealStatus: 'Open',
+        listingRequirements: {
+          titleDocumentFileName: formData.titleDocumentFile ? formData.titleDocumentFile.name : '',
+          titleDocumentFileType: formData.titleDocumentFile ? formData.titleDocumentFile.type : '',
+          physicalConditionDescription: formData.listingRequirements?.physicalConditionDescription || 'Verifiable physical asset with documented standard features and clear estate boundaries.',
+          photos: formData.listingRequirements?.photos || [],
+          locationPin: formData.googlePinLink || formData.listingRequirements?.locationPin || '',
+        },
+        metrics: { views: 0, saves: 0, inquiries: 0 }
+      };
+
+      await addListingRequest(newRequest);
+      localStorage.removeItem('realagents_pending_payment');
+      setSubmitted(true);
+    } catch (err) {
+      console.error("Failed to submit property listing:", err);
+    }
+  };
+
+  if (submitted) {
+    return (
+      <div className="min-h-screen bg-brand-gray dark:bg-[#1c1c21] p-6 animate-fadeIn">
+        <div className="max-w-2xl mx-auto bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 p-8 shadow-brutal-md text-center my-12">
+          <div className="w-16 h-16 bg-brand-teal text-brand-black border-4 border-brand-black dark:border-zinc-700 flex items-center justify-center rounded-none mx-auto mb-6">
+            <CheckCircle size={32} />
+          </div>
+          
+          <h2 className="text-3xl font-display font-black uppercase tracking-tight mb-2 dark:text-white">Listing Submitted!</h2>
+          <span className="bg-brand-teal border-2 border-brand-black dark:border-zinc-750 text-brand-black px-3 py-1 text-xs font-black uppercase tracking-wider inline-block mb-6">
+            AGENT BIDDING IS LIVE
+          </span>
+
+          <p className="text-sm text-zinc-600 dark:text-zinc-400 font-bold uppercase tracking-tight mb-4 leading-relaxed max-w-md mx-auto">
+            Your listing <span className="text-brand-black dark:text-white italic">"{submittedRequestTitle}"</span> was received with verification details.
+          </p>
+          <p className="text-xs text-zinc-400 font-bold uppercase tracking-tight mb-8 leading-relaxed max-w-sm mx-auto">
+            Platform agents can now submit representation bids. You will receive updates in real-time in your space dashboard.
+          </p>
+          
+          <div className="flex flex-col sm:flex-row gap-4">
+            <button
+              onClick={() => {
+                setActiveTab('myspace');
+              }}
+              className="brutalist-button-teal flex-1 py-4 text-xs font-black uppercase tracking-wider shadow-brutal-xs"
+            >
+              Go to My Space
+            </button>
+            <button
+              onClick={onBack}
+              className="brutalist-button-black flex-1 py-4 text-xs font-black uppercase tracking-wider shadow-brutal-xs"
+            >
+              Return to Marketplace
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Both gates checked and paid successfully. Proceed to traditional terms modal / Listing Form
   return (
     <div className="min-h-screen bg-brand-gray dark:bg-[#1c1c21]">
@@ -377,7 +485,7 @@ export default function ListPropertyFlow() {
               </button>
             </motion.div>
           ) : (
-            <ListingForm />
+            <ListingForm onSubmit={handleListingSubmit} />
           )}
         </AnimatePresence>
       </div>

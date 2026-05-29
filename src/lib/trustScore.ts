@@ -7,7 +7,8 @@ export type TrustScoreEvent =
   | 'dispute_lost'
   | 'dispute_won'
   | 'response_under_1hr'
-  | 'off_platform_confirmed';
+  | 'off_platform_confirmed'
+  | 'off_platform_deal_reported';
 
 export function calculateTrustScoreDelta(event: TrustScoreEvent): number {
   switch (event) {
@@ -29,6 +30,8 @@ export function calculateTrustScoreDelta(event: TrustScoreEvent): number {
       return 2;
     case 'off_platform_confirmed':
       return -50;
+    case 'off_platform_deal_reported':
+      return -30;
     default:
       return 0;
   }

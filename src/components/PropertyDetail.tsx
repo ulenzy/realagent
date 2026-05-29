@@ -3,9 +3,11 @@ import {
   ArrowLeft, Share2, Heart, MapPin, ShieldCheck, 
   TrendingUp, Zap, Droplets, Wifi, Route, 
   Lock, Calendar, Clock, MessageSquare, 
-  ChevronRight, Star, ExternalLink, Globe, Info, Check
+  ChevronRight, Star, ExternalLink, Globe, Info, Check, ShieldAlert
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
+import { DisputeFlow } from './DisputeFlow';
+import { InspectionBookingFlow } from './InspectionBookingFlow';
 import { Property } from '../types';
 import { formatCurrency, cn } from '../lib/utils';
 import { MapContainer, TileLayer, Marker } from 'react-leaflet';
@@ -31,6 +33,8 @@ export default function PropertyDetail({
   const [showFloatingBar, setShowFloatingBar] = useState(true);
   const [selectedForCompare, setSelectedForCompare] = useState<string[]>([property.id]);
   const [showCompareTable, setShowCompareTable] = useState(false);
+  const [showDisputeFlow, setShowDisputeFlow] = useState(false);
+  const [showBookingFlow, setShowBookingFlow] = useState(false);
   const actionSectionRef = useRef<HTMLDivElement>(null);
 
   const onToggleSave = toggleSavedProperty;
@@ -448,7 +452,10 @@ export default function PropertyDetail({
                     </p>
                     <p className="opacity-90 leading-tight">100% refundable upon successful property acquisition.</p>
                   </div>
-                  <button className="brutalist-button-red w-full mt-1">
+                  <button 
+                    onClick={() => setShowBookingFlow(true)}
+                    className="brutalist-button-red w-full mt-1"
+                  >
                     Book Inspection
                   </button>
                 </div>
@@ -624,6 +631,30 @@ export default function PropertyDetail({
           })}
           </div>
         </section>
+
+        {/* Dispute / Report Issue Section */}
+        <section className="bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 p-6 shadow-aggressive dark:shadow-[6px_6px_0px_0px_#52525b] mt-12 flex flex-col md:flex-row items-center justify-between gap-6 rounded-sm">
+          <div className="flex items-start gap-4">
+            <div className="p-3 bg-red-100 dark:bg-red-950/30 text-brand-red border-2 border-brand-black dark:border-zinc-700 shrink-0 rotate-1">
+              <ShieldAlert size={28} />
+            </div>
+            <div>
+              <h4 className="text-lg font-black uppercase tracking-tight text-brand-black dark:text-white">
+                Have a Transaction or Listing Issue?
+              </h4>
+              <p className="text-xs text-zinc-500 uppercase mt-1 leading-normal max-w-xl font-bold">
+                If you encounter any off-platform proposals, description mismatch, inspection no-shows, or potential fraud, report a dispute immediately. Our admins review all submissions within 48 hours.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setShowDisputeFlow(true)}
+            className="bg-brand-red text-white font-display font-black uppercase text-xs tracking-widest px-6 py-4 border-4 border-brand-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all cursor-pointer whitespace-nowrap shrink-0"
+            id="report-issue-btn"
+          >
+            Report Issue / Dispute
+          </button>
+        </section>
       </div>
 
       <AnimatePresence>
@@ -631,6 +662,28 @@ export default function PropertyDetail({
           <ComparisonTable 
             properties={mockProperties.filter(p => selectedForCompare.includes(p.id))}
             onClose={() => setShowCompareTable(false)}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showDisputeFlow && (
+          <DisputeFlow
+            property={property}
+            onClose={() => setShowDisputeFlow(false)}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showBookingFlow && (
+          <InspectionBookingFlow
+            property={property}
+            user={user}
+            onClose={() => setShowBookingFlow(false)}
+            onSuccess={() => {
+              // Can trigger properties updated or reload state
+            }}
           />
         )}
       </AnimatePresence>
@@ -650,7 +703,10 @@ export default function PropertyDetail({
                  <span className="text-[8px] font-black uppercase text-brand-teal">Reserve Now</span>
                  <span className="text-lg font-display font-black">{formatCurrency(property.price)}</span>
               </div>
-              <button className="bg-brand-teal text-brand-black px-4 py-1.5 font-display flex flex-col items-center justify-center uppercase shadow-[2px_2px_0px_0px_rgba(255,255,255,1)] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none">
+              <button 
+                onClick={() => setShowBookingFlow(true)}
+                className="bg-brand-teal text-brand-black px-4 py-1.5 font-display flex flex-col items-center justify-center uppercase shadow-[2px_2px_0px_0px_rgba(255,255,255,1)] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
+              >
                 <span className="font-black text-xs leading-none mb-0.5">Inspect Now</span>
                 <span className="text-[7px] font-bold tracking-widest opacity-80">(₦15K Refundable)</span>
               </button>

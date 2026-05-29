@@ -24,9 +24,10 @@ import {
   UserCheck
 } from "lucide-react";
 import { cn, formatCurrency } from "../lib/utils";
-import { collection, query, where, getDocs, onSnapshot, updateDoc, doc, addDoc, setDoc } from "firebase/firestore";
+import { collection, query, where, getDocs, onSnapshot, updateDoc, doc, addDoc, setDoc, getDoc } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import { ListingRequest, User } from "../types";
+import { sendNotification } from "../lib/notifications";
 
 // Setup unique fallback database cases for simulation mode
 const FALLBACK_PENDING_LISTINGS: any[] = [
@@ -139,7 +140,7 @@ const FALLBACK_DISPUTES = [
 ];
 
 export default function AdminPanel() {
-  const { user, listingRequests, updateListingRequest } = useAuth();
+  const { user, listingRequests, updateListingRequest, updateAgentTrustScore } = useAuth();
   const isLocalGuest = !db || user?.isGuest || user?.id === 'guest_local_user';
 
   // Sub-tabs
@@ -150,6 +151,7 @@ export default function AdminPanel() {
   const [agentsList, setAgentsList] = useState<any[]>([]);
   const [disputesList, setDisputesList] = useState<any[]>([]);
   const [activeDisputeNotes, setActiveDisputeNotes] = useState<{ [id: string]: string }>({});
+  const [isSubmittingDisputeAction, setIsSubmittingDisputeAction] = useState(false);
 
   // Listings state inputs
   const [rejectingListingId, setRejectingListingId] = useState<string | null>(null);
@@ -394,26 +396,241 @@ export default function AdminPanel() {
     }
   };
 
-  // 8. RESOLVE DISPUTE
-  const handleResolveDispute = async (disputeId: string, status: 'Resolved' | 'Appealed') => {
+  // 8. RESOLVE, HOLD & DISMISS DISPUTES
+  const handleResolveDisputeAction = async (disputeId: string) => {
     const note = activeDisputeNotes[disputeId] || "";
     if (!note.trim()) {
-      alert("Please write a resolution note first.");
+      alert("Please enter a resolution note first.");
       return;
     }
+
+    const dispute = displayDisputes.find((d) => d.id === disputeId);
+    if (!dispute) return;
+
+    const plaintiffId = dispute.raisedBy || dispute.buyerId;
+    const defendantId = dispute.againstUserId || dispute.agentId;
+    const type = dispute.type || (dispute.reason?.toLowerCase().includes('off-platform') ? 'off_platform_deal' : 'other');
+
+    setIsSubmittingDisputeAction(true);
+
+    try {
+      const nowStr = new Date().toISOString();
+      const appealDeadlineStr = new Date(Date.now() + 48 * 3600000).toISOString();
+
+      if (isLocalGuest) {
+        alert(`[Simulated] Case resolved. ID: ${disputeId}. SLA resolution logged: "${note}".`);
+
+        const stored = JSON.parse(localStorage.getItem('localGuestDisputes') || '[]');
+        const updated = stored.map((d: any) => {
+          if (d.id === disputeId) {
+            return {
+              ...d,
+              status: 'Resolved',
+              disputeStatus: 'Resolved',
+              resolution: note,
+              adminNote: note,
+              resolvedAt: nowStr,
+              appealDeadline: appealDeadlineStr,
+            };
+          }
+          return d;
+        });
+        localStorage.setItem('localGuestDisputes', JSON.stringify(updated));
+
+        if (type === 'off_platform_deal' && defendantId) {
+          await updateAgentTrustScore(defendantId, 'off_platform_deal_reported');
+          
+          let latestScore = 50;
+          const localUserStored = localStorage.getItem('localGuestUser');
+          if (localUserStored) {
+            const u = JSON.parse(localUserStored);
+            if (u.id === defendantId) {
+              latestScore = u.profileScore || 50;
+              if (latestScore < 30) {
+                u.accountStatus = 'Suspended';
+                u.active = false;
+                localStorage.setItem('localGuestUser', JSON.stringify(u));
+              }
+            }
+          }
+        }
+      } else {
+        await updateDoc(doc(db, 'disputes', disputeId), {
+          status: 'Resolved',
+          disputeStatus: 'Resolved',
+          resolution: note,
+          adminNote: note,
+          resolvedAt: nowStr,
+          appealDeadline: appealDeadlineStr,
+        });
+
+        if (type === 'off_platform_deal' && defendantId) {
+          await updateDoc(doc(db, 'users', defendantId), {
+            accountStatus: 'Suspended',
+            active: false,
+            suspendedAt: nowStr,
+            suspensionReason: `Suspended due to verified Off-Platform Deal dispute resolution: Case ID ${disputeId}.`
+          });
+          
+          await updateAgentTrustScore(defendantId, 'off_platform_deal_reported');
+
+          try {
+            const userSnap = await getDoc(doc(db, 'users', defendantId));
+            if (userSnap.exists()) {
+              const uData = userSnap.data();
+              const score = uData.profileScore !== undefined ? uData.profileScore : 50;
+              if (score < 30) {
+                await updateDoc(doc(db, 'users', defendantId), {
+                  accountStatus: 'Suspended',
+                  active: false,
+                  suspensionReason: `Trust score dropped below 30 threshold (Current Score: ${score}). Suspension enforced.`
+                });
+              }
+            }
+          } catch (scoreErr) {
+            console.error("Failed to check trust score for auto suspension:", scoreErr);
+          }
+        }
+      }
+
+      if (plaintiffId) {
+        sendNotification(plaintiffId, {
+          type: 'dispute_resolved',
+          title: "Dispute Case Resolved",
+          body: `Our arbitration review is complete. Action decision: ${note}. Appeal deadline: 48h.`,
+          data: { disputeId }
+        });
+      }
+
+      if (defendantId) {
+        sendNotification(defendantId, {
+          type: 'dispute_resolved',
+          title: "Resolution Adjudication Outcome",
+          body: `Admin resolved Case ID: ${disputeId}. Outcome verdict has been entered and logged.`,
+          data: { disputeId }
+        });
+      }
+
+      alert("Dispute resolved successfully.");
+    } catch (err: any) {
+      console.error(err);
+      alert("Failed to resolve dispute: " + err.message);
+    } finally {
+      setIsSubmittingDisputeAction(false);
+    }
+  };
+
+  const handleDismissDisputeAction = async (disputeId: string) => {
+    const note = activeDisputeNotes[disputeId] || "";
+    if (!note.trim()) {
+      alert("Please enter a dismissal note first.");
+      return;
+    }
+
+    const dispute = displayDisputes.find((d) => d.id === disputeId);
+    if (!dispute) return;
+
+    const plaintiffId = dispute.raisedBy || dispute.buyerId;
+
+    setIsSubmittingDisputeAction(true);
+
+    try {
+      const nowStr = new Date().toISOString();
+
+      if (isLocalGuest) {
+        alert(`[Simulated] Dispute dismissed. ID: ${disputeId}. Note: "${note}"`);
+        const stored = JSON.parse(localStorage.getItem('localGuestDisputes') || '[]');
+        const updated = stored.map((d: any) => {
+          if (d.id === disputeId) {
+            return {
+              ...d,
+              status: 'Closed',
+              disputeStatus: 'Closed',
+              resolution: `Dismissed: ${note}`,
+              adminNote: note,
+              resolvedAt: nowStr
+            };
+          }
+          return d;
+        });
+        localStorage.setItem('localGuestDisputes', JSON.stringify(updated));
+      } else {
+        await updateDoc(doc(db, 'disputes', disputeId), {
+          status: 'Closed',
+          disputeStatus: 'Closed',
+          resolution: `Dismissed: ${note}`,
+          adminNote: note,
+          resolvedAt: nowStr
+        });
+      }
+
+      if (plaintiffId) {
+        sendNotification(plaintiffId, {
+          type: 'dispute_resolved',
+          title: "Dispute Dismissed",
+          body: `Our arbitration review dismissed dispute Case ID ${disputeId}: ${note}`,
+          data: { disputeId }
+        });
+      }
+
+      alert("Dispute dismissed successfully.");
+    } catch (err: any) {
+      console.error(err);
+      alert("Failed to dismiss dispute: " + err.message);
+    } finally {
+      setIsSubmittingDisputeAction(false);
+    }
+  };
+
+  const handleHoldDisputeAction = async (disputeId: string) => {
+    const note = activeDisputeNotes[disputeId] || "";
+
+    const dispute = displayDisputes.find((d) => d.id === disputeId);
+    if (!dispute) return;
+
+    const plaintiffId = dispute.raisedBy || dispute.buyerId;
+
+    setIsSubmittingDisputeAction(true);
+
     try {
       if (isLocalGuest) {
-        alert(`[Simulated] Dispute ${disputeId} set to: ${status} with note "${note}"`);
-        return;
+        alert(`[Simulated] Case set to Hold (Under Review). ID: ${disputeId}.`);
+        const stored = JSON.parse(localStorage.getItem('localGuestDisputes') || '[]');
+        const updated = stored.map((d: any) => {
+          if (d.id === disputeId) {
+            return {
+              ...d,
+              status: 'Under Review',
+              disputeStatus: 'Under Review',
+              adminNote: note || 'Placed under audit review.'
+            };
+          }
+          return d;
+        });
+        localStorage.setItem('localGuestDisputes', JSON.stringify(updated));
+      } else {
+        await updateDoc(doc(db, 'disputes', disputeId), {
+          status: 'Under Review',
+          disputeStatus: 'Under Review',
+          adminNote: note || 'Placed under audit review.'
+        });
       }
-      await updateDoc(doc(db, 'disputes', disputeId), {
-        disputeStatus: status,
-        resolutionNote: note,
-        resolvedAt: new Date().toISOString()
-      });
-      alert(`Dispute successfully updated to status: ${status}`);
-    } catch (err) {
+
+      if (plaintiffId) {
+        sendNotification(plaintiffId, {
+          type: 'dispute_under_review',
+          title: "Dispute Placed Under Review",
+          body: `Case ID: ${disputeId} status updated: Under active investigation review.`,
+          data: { disputeId }
+        });
+      }
+
+      alert("Dispute status updated to Under Review.");
+    } catch (err: any) {
       console.error(err);
+      alert("Failed to update status: " + err.message);
+    } finally {
+      setIsSubmittingDisputeAction(false);
     }
   };
 
@@ -967,12 +1184,12 @@ export default function AdminPanel() {
                       {/* Plaintiff card */}
                       <div className="bg-white dark:bg-zinc-900 p-3.5 border-2 border-brand-black relative">
                         <p className="absolute top-1 right-2 text-[8px] font-bold uppercase tracking-wider text-brand-red bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5">PLAINTIFF</p>
-                        <h5 className="font-display font-bold text-xs uppercase text-zinc-800 dark:text-zinc-200">
-                          {dispute.buyerName} ({dispute.initiatorName === dispute.buyerName ? 'Initiator' : 'Defendant'})
+                        <h5 className="font-display font-medium text-xs uppercase text-zinc-800 dark:text-zinc-200">
+                          {dispute.buyerName || `USER ROLE ${dispute.raisedByRole || 'Buyer'}`}
                         </h5>
-                        <p className="text-[10px] text-zinc-400 font-mono mt-0.5 uppercase">ID: {dispute.buyerId}</p>
+                        <p className="text-[10px] text-zinc-400 font-mono mt-0.5 uppercase">ID: {dispute.raisedBy || dispute.buyerId}</p>
                         <button
-                          onClick={() => handleSuspendUser(dispute.buyerId, dispute.buyerName)}
+                          onClick={() => handleSuspendUser(dispute.raisedBy || dispute.buyerId, dispute.buyerName || 'Plaintiff')}
                           className="mt-3 bg-red-400 hover:bg-brand-red text-white text-[9px] font-black uppercase py-1 px-3 border border-brand-black flex items-center gap-1"
                         >
                           <Ban size={10} /> SUSPEND PLAINTIFF
@@ -982,12 +1199,12 @@ export default function AdminPanel() {
                       {/* Defendant card */}
                       <div className="bg-white dark:bg-zinc-900 p-3.5 border-2 border-brand-black relative">
                         <p className="absolute top-1 right-2 text-[8px] font-bold uppercase tracking-wider text-amber-500 bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5">DEFENDANT</p>
-                        <h5 className="font-display font-bold text-xs uppercase text-zinc-800 dark:text-zinc-200">
-                          {dispute.agentName} ({dispute.initiatorName === dispute.agentName ? 'Initiator' : 'Defendant'})
+                        <h5 className="font-display font-medium text-xs uppercase text-zinc-800 dark:text-zinc-200">
+                          {dispute.agentName || "RESPONDENT PARTY"}
                         </h5>
-                        <p className="text-[10px] text-zinc-400 font-mono mt-0.5 uppercase">ID: {dispute.agentId}</p>
+                        <p className="text-[10px] text-zinc-400 font-mono mt-0.5 uppercase">ID: {dispute.againstUserId || dispute.agentId}</p>
                         <button
-                          onClick={() => handleSuspendUser(dispute.agentId, dispute.agentName)}
+                          onClick={() => handleSuspendUser(dispute.againstUserId || dispute.agentId, dispute.agentName || 'Defendant')}
                           className="mt-3 bg-red-400 hover:bg-brand-red text-white text-[9px] font-black uppercase py-1 px-3 border border-brand-black flex items-center gap-1"
                         >
                           <Ban size={10} /> SUSPEND DEFENDANT
@@ -1000,12 +1217,30 @@ export default function AdminPanel() {
                       <div className="bg-white dark:bg-zinc-900 p-3 border border-zinc-200 dark:border-zinc-800">
                         <span className="text-[9px] text-zinc-400 font-mono block uppercase">Claim Narrative & Grievance</span>
                         <p className="text-xs font-semibold text-zinc-800 dark:text-zinc-300 mt-1 uppercase italic leading-loose">
-                          "{dispute.reason}"
+                          "{dispute.description || dispute.reason}"
                         </p>
+                        
                         <span className="text-[9px] text-zinc-400 font-mono block uppercase mt-3">Exhibited Evidence</span>
-                        <p className="text-xs font-black text-brand-teal mt-0.5 uppercase font-mono">
-                          {dispute.evidence}
-                        </p>
+                        {dispute.evidence && Array.isArray(dispute.evidence) ? (
+                          <div className="flex flex-col gap-1.5 mt-1">
+                            {dispute.evidence.map((url: string, i: number) => (
+                              <a
+                                key={i}
+                                href={url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-xs font-bold text-brand-teal hover:underline flex items-center gap-1 uppercase"
+                              >
+                                <ExternalLink size={12} />
+                                View Evidence File #{i + 1}
+                              </a>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-xs font-black text-brand-teal mt-0.5 uppercase font-mono">
+                            {dispute.evidence || "No evidence file attached."}
+                          </p>
+                        )}
                       </div>
 
                       {/* Resolution Input controls */}
@@ -1023,18 +1258,27 @@ export default function AdminPanel() {
                           />
                         </div>
 
-                        <div className="flex gap-2">
+                        <div className="grid grid-cols-3 gap-1">
                           <button
-                            onClick={() => handleResolveDispute(dispute.id, 'Resolved')}
-                            className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-white text-[10px] font-extrabold uppercase py-2 px-1 border border-brand-black shadow-brutal-xs"
+                            disabled={isSubmittingDisputeAction}
+                            onClick={() => handleResolveDisputeAction(dispute.id)}
+                            className="bg-emerald-500 hover:bg-emerald-405 text-white text-[9px] font-extrabold uppercase py-2 px-1 border border-brand-black shadow-brutal-xs flex items-center justify-center text-center disabled:opacity-40 cursor-pointer"
                           >
-                            SET RESOLVED
+                            Set Resolved
                           </button>
                           <button
-                            onClick={() => handleResolveDispute(dispute.id, 'Appealed')}
-                            className="flex-1 bg-amber-500 hover:bg-amber-400 text-zinc-950 text-[10px] font-extrabold uppercase py-2 px-1 border border-brand-black shadow-brutal-xs"
+                            disabled={isSubmittingDisputeAction}
+                            onClick={() => handleHoldDisputeAction(dispute.id)}
+                            className="bg-zinc-500 hover:bg-zinc-400 text-white text-[9px] font-extrabold uppercase py-2 px-1 border border-brand-black shadow-brutal-xs flex items-center justify-center text-center disabled:opacity-40 cursor-pointer"
                           >
-                            SET APPEALED
+                            Hold Case
+                          </button>
+                          <button
+                            disabled={isSubmittingDisputeAction}
+                            onClick={() => handleDismissDisputeAction(dispute.id)}
+                            className="bg-brand-red hover:bg-red-500 text-white text-[9px] font-extrabold uppercase py-2 px-1 border border-brand-black shadow-brutal-xs flex items-center justify-center text-center disabled:opacity-40 cursor-pointer"
+                          >
+                            Dismiss Case
                           </button>
                         </div>
                       </div>

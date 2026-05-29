@@ -7,6 +7,7 @@ import { ChatSession, Message } from '../types';
 import { collection, query, where, onSnapshot, doc, setDoc, getDoc, addDoc, orderBy } from 'firebase/firestore';
 import { auth, db, OperationType, handleFirestoreError } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
+import { AVATAR_COSMETICS } from '../constants/cosmetics';
 
 interface MessagingProps {
   isOpen: boolean;
@@ -523,6 +524,12 @@ export default function Messaging({ isOpen, onClose, initialChatId }: MessagingP
                               );
                             }
 
+                            const activeAvatar = (isMe && user?.equippedAvatarId) 
+                              ? AVATAR_COSMETICS.find(a => a.id === user.equippedAvatarId) 
+                              : null;
+                            const isLegendary = activeAvatar?.rarity === 'Legendary';
+                            const isEpic = activeAvatar?.rarity === 'Epic';
+
                             return (
                               <div key={msg.id || i} className={cn(
                                 "flex flex-col max-w-[80%]",
@@ -531,9 +538,14 @@ export default function Messaging({ isOpen, onClose, initialChatId }: MessagingP
                                 <div className={cn(
                                   "p-3 text-sm border-2 border-brand-black shadow-brutal-xs relative group",
                                   isMe 
-                                    ? "bg-brand-teal text-brand-black rounded-tl-xl rounded-tr-xl rounded-bl-xl" 
+                                    ? isLegendary
+                                      ? "bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-500 text-amber-950 border-amber-600 font-bold rounded-tl-xl rounded-tr-xl rounded-bl-xl shadow-[0_0_14px_rgba(245,158,11,0.6)]"
+                                      : isEpic
+                                        ? "bg-gradient-to-r from-purple-600 to-fuchsia-500 text-white border-purple-400 font-semibold rounded-tl-xl rounded-tr-xl rounded-bl-xl shadow-[0_0_10px_rgba(168,85,247,0.5)]"
+                                        : "bg-brand-teal text-brand-black rounded-tl-xl rounded-tr-xl rounded-bl-xl" 
                                     : "bg-white dark:bg-zinc-800 text-brand-black dark:text-white rounded-tl-xl rounded-tr-xl rounded-br-xl"
                                 )}>
+                                  {isLegendary && <span className="inline-block mr-1 text-xs">👑</span>}
                                   {msg.text}
                                   
                                   {/* Hover Encryption Info */}

@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { useAuth } from './AuthContext';
 
 interface UIContextType {
   isDarkMode: boolean;
@@ -14,6 +15,7 @@ interface UIContextType {
 const UIContext = createContext<UIContextType | undefined>(undefined);
 
 export const UIProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user } = useAuth();
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [isMessagingOpen, setIsMessagingOpen] = useState(false);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
@@ -30,12 +32,35 @@ export const UIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   }, []);
 
   useEffect(() => {
-    if (isDarkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
+    const activeTheme = user?.preferences?.theme || 'system';
+    
+    const applyTheme = (theme: 'light' | 'dark' | 'system') => {
+      let resolvedDark = false;
+      if (theme === 'system') {
+        resolvedDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      } else {
+        resolvedDark = theme === 'dark';
+      }
+      
+      if (resolvedDark) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+      
+      document.documentElement.setAttribute('data-theme', theme);
+      setIsDarkMode(resolvedDark);
+    };
+
+    applyTheme(activeTheme);
+    
+    if (activeTheme === 'system') {
+      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+      const listener = () => applyTheme('system');
+      mediaQuery.addEventListener('change', listener);
+      return () => mediaQuery.removeEventListener('change', listener);
     }
-  }, [isDarkMode]);
+  }, [user?.preferences?.theme]);
 
   const toggleDarkMode = () => setIsDarkMode(!isDarkMode);
 

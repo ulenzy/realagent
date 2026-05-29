@@ -228,6 +228,22 @@ export interface Transaction {
   timestamp: string;
 }
 
+export interface UserPreferences {
+  theme: 'light' | 'dark' | 'system';
+  notifications: {
+    bidReceived: boolean;
+    listingApproved: boolean;
+    inspectionConfirmed: boolean;
+    messageReceived: boolean;
+    dealStatusUpdate: boolean;
+    marketingUpdates: boolean;
+  };
+  language: 'en';
+  currency: 'NGN' | 'USD' | 'GBP';
+  defaultSearchView: 'list' | 'map';
+  defaultListingType: 'All' | 'Sale' | 'Rent';
+}
+
 export interface User {
   id: string;
   name: string; // The unique display name
@@ -247,6 +263,12 @@ export interface User {
   savedProperties: string[];
   isAgent: boolean;
   isSubscriber: boolean;
+  ownedAvatars?: string[];
+  equippedAvatarId?: string;
+  ownedFrames?: string[];
+  equippedFrameId?: string;
+  ownedTitles?: string[];
+  equippedTitleId?: string;
   kycStatus: 'None' | 'Pending' | 'Verified';
   kycDocuments: string[];
   profileScore: number;
@@ -263,7 +285,6 @@ export interface User {
   linkedin?: string;
   onlineHours?: string;
   specializationArea?: string;
-  isGuest?: boolean;
   avatarRolls?: {
     regular: number;
     epic: number;
@@ -280,4 +301,42 @@ export interface User {
   dealsClosedCount?: number;
   inspectionsCompletedCount?: number;
   commissionRate?: number;
+  preferences?: UserPreferences;
+  profileVisible?: boolean;
 }
+
+export interface Dispute {
+  id: string;
+  listingId: string;
+  propertyTitle: string;
+  raisedBy: string;
+  raisedByRole: 'Buyer' | 'Seller' | 'Agent';
+  againstUserId: string;
+  type: 'property_mismatch' | 'off_platform_deal' | 'inspection_no_show' | 'fraud' | 'other';
+  description: string;
+  evidence: string[];
+  status: 'Open' | 'Under Review' | 'Resolved' | 'Appealed' | 'Closed';
+  adminNote?: string;
+  resolution?: string;
+  raisedAt: string;
+  resolvedAt?: string;
+  appealDeadline?: string;
+}
+
+export interface NotificationEvent {
+  type: string;
+  title: string;
+  body: string;
+  data?: Record<string, string>;
+}
+
+export interface InAppNotification {
+  id: string;
+  title: string;
+  body: string;
+  type: string;
+  data?: Record<string, string>;
+  read: boolean;
+  createdAt: string;
+}
+
