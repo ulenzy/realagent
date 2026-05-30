@@ -55,6 +55,7 @@ export interface Property {
   id: string;
   title: string;
   type: string; // Changed from PropertyType to string to allow 'Duplex', 'Terrace' etc.
+  propertyCategory: 'Land' | 'Building';
   listingType: ListingType;
   price: number;
   sizeSqm: number;
@@ -96,6 +97,14 @@ export interface Property {
   commission?: number; // percentage
   acceptsDownPayment?: boolean;
   listingRequirements?: ListingRequirements;
+  landDetails?: {
+    landSize: number;
+    landSizeUnit: 'sqm' | 'hectares';
+    surveyPlanFileName: string;
+    surveyPlanUrl: string;
+    landUse: 'Residential' | 'Commercial' | 'Mixed Use' | 'Agricultural';
+    topography: string;
+  };
   listingRequestId?: string;
   verificationFeePaid?: boolean;
 }
@@ -150,6 +159,7 @@ export interface ListingRequest {
   id: string;
   title: string;
   type: string;
+  propertyCategory: 'Land' | 'Building';
   price: number;
   location: string;
   status: ListingStatus;
@@ -171,6 +181,14 @@ export interface ListingRequest {
   assignedAgentId?: string;
   assignedAgentTier?: AgentTier;
   listingRequirements: ListingRequirements;
+  landDetails?: {
+    landSize: number;
+    landSizeUnit: 'sqm' | 'hectares';
+    surveyPlanFileName: string;
+    surveyPlanUrl: string;
+    landUse: 'Residential' | 'Commercial' | 'Mixed Use' | 'Agricultural';
+    topography: string;
+  };
   agentBids?: AgentBid[];
   listingType: 'Sale' | 'Rent';
   propertySubType: string;

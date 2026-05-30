@@ -14,7 +14,10 @@ const propertyTypes = [
   { type: 'Land', icon: Trees, label: 'Plots / Acres' }
 ];
 
-export default function ListingForm({ onSubmit, initialData }: { onSubmit?: (data: any) => void; initialData?: any; }) {
+import DocumentUpload from './shared/DocumentUpload';
+import PhotoUpload from './shared/PhotoUpload';
+
+export default function BuildingListingForm({ onSubmit, initialData }: { onSubmit?: (data: any) => void; initialData?: any; }) {
   const [step, setStep] = useState(1);
   const [formData, setFormData] = useState({
     title: '',
@@ -56,7 +59,7 @@ export default function ListingForm({ onSubmit, initialData }: { onSubmit?: (dat
   const handlePrev = () => setStep(s => Math.max(s - 1, 1));
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (onSubmit) onSubmit(formData);
+    if (onSubmit) onSubmit({ ...formData, propertyCategory: 'Building' });
   };
 
   const handlePhotosUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -371,14 +374,16 @@ export default function ListingForm({ onSubmit, initialData }: { onSubmit?: (dat
 
             {/* Media & Location Requirements */}
             <div className="brutalist-card-flat p-4 bg-zinc-50 dark:bg-zinc-900/50 space-y-6">
-               <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-black uppercase text-zinc-500 tracking-widest pl-1">Title Document {formData.listingType === 'Sale' && '*'}</label>
-                  <input type="file" className="brutalist-input" onChange={e => setFormData({...formData, titleDocumentFile: e.target.files?.[0] || null})} />
-               </div>
-               <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-black uppercase text-zinc-500 tracking-widest pl-1">Property Photos (Min 3) *</label>
-                  <input type="file" multiple className="brutalist-input" onChange={handlePhotosUpload} />
-               </div>
+               <DocumentUpload 
+                  label="Title Document" 
+                  required={formData.listingType === 'Sale'} 
+                  onFileSelect={file => setFormData({...formData, titleDocumentFile: file})} 
+                />
+               <PhotoUpload 
+                  label="Property Photos (Min 3)" 
+                  required 
+                  onPhotosSelect={handlePhotosUpload} 
+                />
                <div className="flex flex-col gap-1.5">
                  <label className="flex items-center gap-2 text-[10px] font-black uppercase text-zinc-500 tracking-widest pl-1">
                    Google Pin Link / Coordinates *

@@ -497,6 +497,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const newPropertyData = {
       title: listingRequest.title || 'Approved Property',
       type: listingRequest.type || 'House',
+      propertyCategory: listingRequest.propertyCategory || 'Building',
+      landDetails: listingRequest.landDetails,
       price: priceNum,
       listingType: listingRequest.listingType || ('Sale' as ListingType),
       sizeSqm: listingRequest.sizeSqm || 850,

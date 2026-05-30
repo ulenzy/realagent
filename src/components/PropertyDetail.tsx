@@ -311,18 +311,24 @@ export default function PropertyDetail({
               </div>
               <div className="grid grid-cols-3 gap-4 border-t border-zinc-800 pt-4">
                 <div className="flex flex-col">
-                  <span className="text-[10px] font-black uppercase text-zinc-500">Size</span>
-                  <span className="text-xl font-display font-black">{property.sizeSqm} SQM</span>
+                  <span className="text-[10px] font-black uppercase text-zinc-500">{property.propertyCategory === 'Land' ? 'Land Size' : 'Size'}</span>
+                  <span className="text-xl font-display font-black">{property.propertyCategory === 'Land' ? `${property.landDetails?.landSize || property.sizeSqm} ${property.landDetails?.landSizeUnit || 'SQM'}` : `${property.sizeSqm} SQM`}</span>
                 </div>
-                {property.type !== 'Land' && (
+                {property.propertyCategory !== 'Land' && (
                   <div className="flex flex-col border-x border-zinc-800 px-4">
                     <span className="text-[10px] font-black uppercase text-zinc-500">Layout</span>
                     <span className="text-xl font-display font-black">{property.bedrooms} Bed / {property.bathrooms} Bath</span>
                   </div>
                 )}
+                {property.propertyCategory === 'Land' && (
+                   <div className="flex flex-col border-x border-zinc-800 px-4">
+                     <span className="text-[10px] font-black uppercase text-zinc-500">Survey</span>
+                     <span className="text-xl font-display font-black">{property.landDetails?.surveyPlanFileName ? 'Available' : 'Pending'}</span>
+                   </div>
+                )}
                 <div className="flex flex-col">
-                  <span className="text-[10px] font-black uppercase text-zinc-500">Estate</span>
-                  <span className="text-xl font-display font-black">{property.estateName}</span>
+                  <span className="text-[10px] font-black uppercase text-zinc-500">{property.propertyCategory === 'Land' ? 'Land Use' : 'Estate'}</span>
+                  <span className="text-xl font-display font-black">{property.propertyCategory === 'Land' ? (property.landDetails?.landUse || 'Land') : property.estateName}</span>
                 </div>
               </div>
             </div>

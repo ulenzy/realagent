@@ -882,8 +882,15 @@ export const PropertyCard: React.FC<{
       <div className="p-4 flex flex-col gap-3">
         <div className="flex justify-between items-start gap-2">
           <div className="cursor-pointer flex-1" onClick={onViewDetails}>
-            <div className="flex items-center gap-1 text-[9px] font-black uppercase tracking-widest mb-1">
-              <span className="text-brand-teal bg-brand-black px-1.5 py-0.5 border border-brand-teal">{property.estateName}</span>
+            <div className="flex flex-wrap items-center gap-1 text-[9px] font-black uppercase tracking-widest mb-1">
+              <span className="text-brand-teal bg-brand-black px-1.5 py-0.5 border border-brand-teal">{property.estateName || 'No Estate'}</span>
+              
+              {property.propertyCategory === 'Land' ? (
+                <span className="text-brand-black bg-brand-teal px-1.5 py-0.5 border border-brand-black">LAND</span>
+              ) : (
+                <span className="text-white bg-zinc-600 px-1.5 py-0.5 border border-brand-black">BUILDING</span>
+              )}
+              
               {property.type !== 'Land' && (
                 <span className="text-brand-black bg-brand-teal/20 px-1.5 py-0.5 border border-brand-black/10">{property.type}</span>
               )}
