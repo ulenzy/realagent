@@ -86,6 +86,9 @@ export interface Property {
   isSubscriber?: boolean;
   expiresAt: string;
   isDistressDeal?: boolean;
+  priceTag?: 'Standard' | 'Distress Sale' | 'Super-Distress Sale' | 'Above Market';
+  askingPrice?: number;
+  salePrice?: number;
   furnishing?: 'Unfurnished' | 'Semi-furnished' | 'Fully-furnished';
   condition?: 'New' | 'Renovated' | 'Old';
   tags?: string[];
@@ -127,7 +130,16 @@ export interface TokenPurchase {
 
 export type ListingFeeStatus = 'Verification Unpaid' | 'Verification Paid' | 'Monthly Unpaid' | 'Monthly Paid' | 'Inactive' | 'Unpaid' | 'Paid' | 'Waived';
 
-export type ListingStatus = 'Pending' | 'Agent Bidding' | 'Inspection Scheduled' | 'Under Review' | 'Approved' | 'Rejected' | 'Archived' | 'Inactive';
+export type ListingStatus = 'Draft' | 'Pending' | 'Agent Bidding' | 'Inspection Scheduled' | 'Under Review' | 'Approved' | 'Rejected' | 'Archived' | 'Inactive';
+
+export interface ReviewRequest {
+  id: string;
+  category: 'Price Adjustment' | 'Location Correction' | 'Photo Update' | 'Document Update' | 'Description Change' | 'Other';
+  description: string;
+  submittedAt: string;
+  status: 'Pending' | 'Approved' | 'Rejected';
+  adminNote?: string;
+}
 
 export interface ListingRequirements {
   titleDocumentFileName: string;       // filename of uploaded title document
@@ -172,6 +184,13 @@ export interface ListingRequest {
   acceptsDownPayment?: boolean;
   documents?: { name: string; fileType: string; fileName: string }[];
   googlePinLink?: string;
+  isDraft?: boolean;
+  draftSavedAt?: string;
+  askingPrice?: number;
+  salePrice?: number;
+  priceDifferencePercent?: number;
+  priceTag?: 'Standard' | 'Distress Sale' | 'Super-Distress Sale' | 'Above Market';
+  reviewRequests?: ReviewRequest[];
   metrics?: {
     views: number;
     saves: number;
@@ -321,6 +340,7 @@ export interface User {
   commissionRate?: number;
   preferences?: UserPreferences;
   profileVisible?: boolean;
+  draftCount?: number;
 }
 
 export interface Dispute {

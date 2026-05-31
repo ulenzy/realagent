@@ -252,7 +252,7 @@ export default function Marketplace() {
             <input 
               type="text" 
               placeholder="Search estates, locations, or properties..."
-              className="w-full bg-white dark:bg-zinc-900 dark:border-zinc-700 dark:text-white border-2 border-brand-black p-4 pl-12 font-display uppercase tracking-tight focus:outline-none focus:ring-2 focus:ring-brand-teal shadow-brutal-sm dark:shadow-[2px_2px_0px_0px_#52525b]"
+              className="w-full bg-white dark:bg-zinc-900 dark:border-zinc-700 dark:text-white border-2 border-brand-black p-4 !pl-12 font-display uppercase tracking-tight focus:outline-none focus:ring-2 focus:ring-brand-teal shadow-brutal-sm dark:shadow-[2px_2px_0px_0px_#52525b]"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onFocus={() => setShowSearchSuggestions(true)}
@@ -350,7 +350,7 @@ export default function Marketplace() {
       </section>
 
       {/* Results Count & Sorting */}
-      <section className="flex justify-between items-center">
+      <section className="flex flex-col sm:flex-row justify-between sm:items-center gap-3">
         <div className="flex items-center gap-2">
            <span className="text-2xl font-black italic">{filteredProperties.length}</span>
            <span className="text-[10px] font-black uppercase text-zinc-400 tracking-tighter mt-2">Inventory Items Available</span>
@@ -822,7 +822,17 @@ export const PropertyCard: React.FC<{
           className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
         />
         {/* Badges Overlay */}
-        <div className="absolute top-3 left-3 flex flex-col gap-2 z-10">
+        <div className="absolute top-3 left-3 flex flex-wrap gap-1.5 max-w-[calc(100%-60px)] z-10">
+          {property.priceTag === 'Super-Distress Sale' && (
+            <div className="bg-brand-red text-white px-2 py-1 border-2 border-brand-black shadow-brutal-sm font-display font-black text-[9px] uppercase flex items-center gap-1 animate-bounce">
+              <Zap size={10} className="fill-white animate-pulse" /> Super Distress
+            </div>
+          )}
+          {property.priceTag === 'Distress Sale' && (
+            <div className="bg-orange-500 text-white px-2 py-1 border-2 border-brand-black shadow-brutal-sm font-display font-black text-[9px] uppercase flex items-center gap-1 animate-pulse">
+              <Zap size={10} className="fill-white" /> Distress Sale
+            </div>
+          )}
           {property.isBoosted && (
              <div className="bg-amber-400 text-brand-black px-2 py-1 border-2 border-brand-black shadow-brutal-sm font-display font-black text-[9px] uppercase flex items-center gap-1">
                <Star size={10} className="fill-brand-black" /> Boosted

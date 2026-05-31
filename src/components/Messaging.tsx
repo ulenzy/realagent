@@ -378,7 +378,7 @@ export default function Messaging({ isOpen, onClose, initialChatId }: MessagingP
                     <input 
                       type="text" 
                       placeholder="Search messages..."
-                      className="brutalist-input pl-10"
+                      className="brutalist-input !pl-10"
                     />
                   </div>
                 </div>

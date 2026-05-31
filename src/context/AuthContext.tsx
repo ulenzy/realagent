@@ -12,10 +12,10 @@ import {
   updateProfile
 } from 'firebase/auth';
 import { auth, googleProvider, facebookProvider } from '../lib/firebase';
-import { doc, getDoc, getDocs, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove, collection, query, where, addDoc, Timestamp } from 'firebase/firestore';
+import { doc, getDoc, getDocs, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove, collection, query, where, addDoc, deleteDoc, Timestamp } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { sendNotification } from '../lib/notifications';
-import { User, ListingRequest, Transaction, Property, ListingType, AgentTier, ROILevel, AreaTrend } from '../types';
+import { User, ListingRequest, ListingStatus, Transaction, Property, ListingType, AgentTier, ROILevel, AreaTrend } from '../types';
 import { TrustScoreEvent, calculateTrustScoreDelta } from '../lib/trustScore';
 import { generateEstateIntelligence } from '../lib/estateIntelligence';
 
@@ -41,6 +41,11 @@ interface AuthContextType {
   updateUser: (updates: Partial<User>) => Promise<void>;
   addTransaction: (transaction: Transaction) => Promise<void>;
   updateAgentTrustScore: (agentId: string, event: TrustScoreEvent) => Promise<void>;
+  drafts: ListingRequest[];
+  saveDraft: (draftData: Partial<ListingRequest>) => Promise<string>;
+  updateDraft: (draftId: string, data: Partial<ListingRequest>) => Promise<void>;
+  deleteDraft: (draftId: string) => Promise<void>;
+  promoteDraftToListing: (draftId: string) => Promise<void>;
 }
 
 export const DEFAULT_PREFERENCES = {
@@ -69,9 +74,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [listingRequests, setListingRequests] = useState<ListingRequest[]>([]);
   const [platformListings, setPlatformListings] = useState<ListingRequest[]>([]);
   const [savedProperties, setSavedProperties] = useState<string[]>([]);
+  const [drafts, setDrafts] = useState<ListingRequest[]>([]);
   const unsubscribeUserRef = React.useRef<(() => void) | null>(null);
   const unsubscribeListingsRef = React.useRef<(() => void) | null>(null);
   const unsubscribePlatformListingsRef = React.useRef<(() => void) | null>(null);
+  const unsubscribeDraftsRef = React.useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, async (fUser) => {
@@ -109,6 +116,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 logout().catch((err) => console.error("Auto-logout on suspension/ban failed:", err));
               }, 3000);
             }
+
+            // Listen to draft collection
+            if (unsubscribeDraftsRef.current) {
+              unsubscribeDraftsRef.current();
+            }
+            const draftsQuery = query(collection(db, 'drafts'), where('ownerId', '==', fUser.uid));
+            unsubscribeDraftsRef.current = onSnapshot(draftsQuery, (snapshot) => {
+              const uDrafts = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+              } as any));
+              setDrafts(uDrafts);
+            }, (err) => {
+              console.error("Drafts subscription error:", err);
+            });
 
             // Dynamically set up listingRequests subscription depending on role
             if (unsubscribeListingsRef.current) {
@@ -211,10 +233,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (unsubscribeUserRef.current) unsubscribeUserRef.current();
         if (unsubscribeListingsRef.current) unsubscribeListingsRef.current();
         if (unsubscribePlatformListingsRef.current) unsubscribePlatformListingsRef.current();
+        if (unsubscribeDraftsRef.current) unsubscribeDraftsRef.current();
         setUser(null);
         setListingRequests([]);
         setPlatformListings([]);
         setSavedProperties([]);
+        setDrafts([]);
         setLoading(false);
       }
     });
@@ -224,6 +248,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (unsubscribeUserRef.current) unsubscribeUserRef.current();
       if (unsubscribeListingsRef.current) unsubscribeListingsRef.current();
       if (unsubscribePlatformListingsRef.current) unsubscribePlatformListingsRef.current();
+      if (unsubscribeDraftsRef.current) unsubscribeDraftsRef.current();
     };
   }, []);
 
@@ -560,6 +585,78 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const saveDraft = async (draftData: Partial<ListingRequest>): Promise<string> => {
+    if (!user) throw new Error("User must be logged in to save drafts.");
+    if ((user.draftCount || 0) >= 3) {
+      throw new Error("Draft limit reached — you have 3 saved drafts. Submit or delete one before saving a new draft.");
+    }
+    try {
+      const docRef = doc(collection(db, 'drafts'));
+      const draftId = docRef.id;
+      const now = new Date().toISOString();
+      await setDoc(docRef, {
+        ...draftData,
+        id: draftId,
+        ownerId: user.id,
+        isDraft: true,
+        draftSavedAt: now,
+        status: 'Draft' as ListingStatus
+      });
+      const newCount = (user.draftCount || 0) + 1;
+      await updateUser({ draftCount: newCount });
+      return draftId;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'drafts');
+      throw error;
+    }
+  };
+
+  const updateDraft = async (draftId: string, data: Partial<ListingRequest>): Promise<void> => {
+    try {
+      const now = new Date().toISOString();
+      const docRef = doc(db, 'drafts', draftId);
+      await updateDoc(docRef, {
+        ...data,
+        draftSavedAt: now
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `drafts/${draftId}`);
+    }
+  };
+
+  const deleteDraft = async (draftId: string): Promise<void> => {
+    if (!user) return;
+    try {
+      const docRef = doc(db, 'drafts', draftId);
+      await deleteDoc(docRef);
+      const newCount = Math.max(0, (user.draftCount || 0) - 1);
+      await updateUser({ draftCount: newCount });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `drafts/${draftId}`);
+    }
+  };
+
+  const promoteDraftToListing = async (draftId: string): Promise<void> => {
+    try {
+      const docRef = doc(db, 'drafts', draftId);
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        const draftData = snap.data() as ListingRequest;
+        const { isDraft, ...listingData } = draftData;
+        const promotedListing = {
+          ...listingData,
+          status: 'Agent Bidding' as ListingStatus,
+          submittedAt: new Date().toISOString(),
+          lastUpdated: new Date().toISOString()
+        };
+        await addListingRequest(promotedListing);
+        await deleteDraft(draftId);
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `listingRequests/${draftId}`);
+    }
+  };
+
   const updateListingRequest = async (id: string, updates: Partial<ListingRequest>) => {
     try {
       const docRef = doc(db, 'listingRequests', id);
@@ -570,6 +667,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const data = snap.data();
         listingOwnerId = data?.ownerId || '';
         listingTitle = data?.title || listingTitle;
+      }
+
+      if (updates.agentBids) {
+        const hasSelfBid = updates.agentBids.some(bid => bid.agentId === listingOwnerId);
+        if (hasSelfBid) {
+          throw new Error("Conflict of interest — you cannot place a bid on your own property listing.");
+        }
       }
 
       await updateDoc(docRef, updates);
@@ -657,7 +761,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <AuthContext.Provider value={{ 
       user, firebaseUser, loading, error, listingRequests, platformListings, savedProperties, isLocalGuest: false,
       signInWithGoogle, signInWithFacebook, signInWithEmail, signUpWithEmail, signInWithGoogleMock, signInWithFacebookMock, logout,
-      toggleSavedProperty, addListingRequest, updateListingRequest, updateUser, addTransaction, updateAgentTrustScore
+      toggleSavedProperty, addListingRequest, updateListingRequest, updateUser, addTransaction, updateAgentTrustScore,
+      drafts, saveDraft, updateDraft, deleteDraft, promoteDraftToListing
     }}>
       {children}
     </AuthContext.Provider>

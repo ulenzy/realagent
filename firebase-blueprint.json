@@ -172,6 +172,10 @@
       "schema": "ListingRequest",
       "description": "Listing requests in pipeline and agent bidding"
     },
+    "drafts/{draftId}": {
+      "schema": "ListingRequest",
+      "description": "Unpublished listing request drafts saved in user's workspace"
+    },
     "properties/{propertyId}": {
       "schema": "Property",
       "description": "Marketplace live property listings"

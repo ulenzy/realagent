@@ -590,7 +590,7 @@ function TabButton({
     <button
       onClick={onClick}
       className={cn(
-        "flex flex-col items-center py-1 px-4 transition-all relative group",
+        "flex flex-col items-center py-1 px-1 sm:px-3 lg:px-4 transition-all relative group",
         active ? "text-brand-teal" : "text-zinc-500 hover:text-black dark:text-zinc-400 dark:hover:text-white"
       )}
     >
@@ -605,7 +605,7 @@ function TabButton({
         )}
       </div>
       <span className={cn(
-        "text-[10px] font-display font-black uppercase tracking-widest",
+        "text-[8px] sm:text-[10px] font-display font-black uppercase tracking-wider md:tracking-widest",
         active ? "opacity-100" : "opacity-60"
       )}>
         {label}

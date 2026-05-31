@@ -185,7 +185,7 @@ export default function Login() {
                     placeholder="Musa Aminu"
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
-                    className="w-full pl-10 pr-4 py-3 bg-white dark:bg-zinc-800 border-2 border-brand-black text-brand-black dark:text-white font-medium text-sm focus:outline-none focus:ring-2 focus:ring-brand-teal transition-all"
+                    className="w-full !pl-10 pr-4 py-3 bg-white dark:bg-zinc-800 border-2 border-brand-black text-brand-black dark:text-white font-medium text-sm focus:outline-none focus:ring-2 focus:ring-brand-teal transition-all"
                   />
                 </div>
               </div>
@@ -201,7 +201,7 @@ export default function Login() {
                   placeholder="name@domain.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 bg-white dark:bg-zinc-800 border-2 border-brand-black text-brand-black dark:text-white font-medium text-sm focus:outline-none focus:ring-2 focus:ring-brand-teal transition-all"
+                  className="w-full !pl-10 pr-4 py-3 bg-white dark:bg-zinc-800 border-2 border-brand-black text-brand-black dark:text-white font-medium text-sm focus:outline-none focus:ring-2 focus:ring-brand-teal transition-all"
                 />
               </div>
             </div>
@@ -216,7 +216,7 @@ export default function Login() {
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 bg-white dark:bg-zinc-800 border-2 border-brand-black text-brand-black dark:text-white font-medium text-sm focus:outline-none focus:ring-2 focus:ring-brand-teal transition-all"
+                  className="w-full !pl-10 pr-4 py-3 bg-white dark:bg-zinc-800 border-2 border-brand-black text-brand-black dark:text-white font-medium text-sm focus:outline-none focus:ring-2 focus:ring-brand-teal transition-all"
                 />
               </div>
             </div>

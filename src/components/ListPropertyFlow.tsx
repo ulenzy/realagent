@@ -2,20 +2,22 @@ import React, { useState, useEffect } from 'react';
 import BuildingListingForm from './BuildingListingForm';
 import LandListingForm from './LandListingForm';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowLeft, ShieldAlert, CheckCircle, CreditCard, Coins, Check, FileText, Building2, Map } from 'lucide-react';
+import { ArrowLeft, ShieldAlert, CheckCircle, CreditCard, Coins, Check, FileText, Building2, Map, Home, Trees } from 'lucide-react';
 
 import { ListingRequest } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useNavigation } from '../context/NavigationContext';
 
 export default function ListPropertyFlow() {
-  const { user, updateUser, addTransaction, listingRequests, addListingRequest } = useAuth();
+  const { user, updateUser, addTransaction, listingRequests, addListingRequest, drafts, saveDraft } = useAuth();
   const { handleBackToMarketplace: onBack, setIsListingFlow, setActiveTab } = useNavigation();
 
 
   const [listingCategory, setListingCategory] = useState<'Building' | 'Land' | null>(null);
   const [monthlyFeePaid, setMonthlyFeePaid] = useState(false);
   const [tokenError, setTokenError] = useState<string | null>(null);
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const [draftSaved, setDraftSaved] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [submittedRequestTitle, setSubmittedRequestTitle] = useState('');
 
@@ -347,24 +349,63 @@ export default function ListPropertyFlow() {
       
       // Clean and parse price
       let cleanPrice = 0;
-      if (formData.price) {
+      if (formData.propertyCategory === 'Land' || formData.pricePerSqm) {
+        const size = parseFloat(formData.landDetails?.landSize || '0');
+        const pricePerSqm = parseFloat(String(formData.pricePerSqm || '0').replace(/[^0-9.]/g, ''));
+        cleanPrice = size * pricePerSqm;
+      } else if (formData.price) {
         cleanPrice = parseFloat(String(formData.price).replace(/[^0-9.]/g, '')) || 0;
       }
 
       const generatedTitle = `${formData.bedrooms} Bed ${formData.propertySubType} inside ${formData.estateName}`;
       setSubmittedRequestTitle(generatedTitle);
 
+      // Dual values resolution
+      const ask = parseFloat(String(formData.askingPrice || '0')) || cleanPrice;
+      const sale = parseFloat(String(formData.salePrice || '0')) || cleanPrice;
+      const diffPercent = ask > 0 ? ((sale - ask) / ask) * 100 : 0;
+      let tag: 'Standard' | 'Distress Sale' | 'Super-Distress Sale' | 'Above Market' = 'Standard';
+      if (diffPercent < -20) {
+        tag = 'Super-Distress Sale';
+      } else if (diffPercent <= -6) {
+        tag = 'Distress Sale';
+      } else if (diffPercent >= 5.1) {
+        tag = 'Above Market';
+      }
+
       let finalRequest: ListingRequest;
       if (formData.propertyCategory === 'Land') {
-        const generatedTitle = formData.title || `${formData.landDetails?.landSize || 0} ${formData.landDetails?.landSizeUnit || 'sqm'} ${formData.landDetails?.landUse || 'Land'}`;
+        let generatedTitle = `${formData.landDetails?.landSize || '0'}SQM ${formData.landDetails?.landUse || 'Land'} Land — ${formData.state || 'Abuja'}`;
+        try {
+          const titleRes = await fetch('/api/generate-land-title', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              landUse: formData.landDetails?.landUse || 'Land',
+              landSize: formData.landDetails?.landSize || '0',
+              state: formData.state || 'Abuja'
+            })
+          });
+          const titleData = await titleRes.json();
+          if (titleData && titleData.title) {
+            generatedTitle = titleData.title;
+          }
+        } catch (err) {
+          console.warn("Failed to generate title, using fallback:", err);
+        }
+
         setSubmittedRequestTitle(generatedTitle);
         finalRequest = {
           id: `req-${Date.now()}`,
           title: generatedTitle,
           type: 'Land',
           propertyCategory: 'Land',
-          price: cleanPrice,
-          location: formData.location || '',
+          price: sale,
+          askingPrice: ask,
+          salePrice: sale,
+          priceDifferencePercent: diffPercent,
+          priceTag: tag,
+          location: `${formData.lga || ''}, ${formData.state || ''}`,
           status: 'Agent Bidding',
           submittedAt: now,
           lastUpdated: now,
@@ -372,12 +413,12 @@ export default function ListPropertyFlow() {
           commission: resolvedCommission,
           listingType: formData.listingType || 'Sale',
           propertySubType: 'Land',
-          sizeSqm: formData.landDetails?.landSizeUnit === 'hectares' ? (parseFloat(formData.landDetails.landSize) * 10000) : parseFloat(formData.landDetails?.landSize || '0'),
+          sizeSqm: parseFloat(formData.landDetails?.landSize || '0'),
           bedrooms: 0,
           bathrooms: 0,
-          estateName: '',
-          amenities: [],
-          googlePinLink: formData.landDetails?.locationPin || '',
+          estateName: formData.landDetails?.isEstatePlot ? (formData.landDetails?.estateName || '') : '',
+          amenities: formData.landDetails?.infrastructure || [],
+          googlePinLink: formData.googlePinLink || formData.landDetails?.locationPin || '',
           listingFeeStatus: pendingPayment?.listingFeeStatus || 'Unpaid',
           listingFeePaidAt: pendingPayment?.monthlyFeePaidAt || '',
           verificationFeePaid: user.verifiedPropertySeller || false,
@@ -388,9 +429,9 @@ export default function ListPropertyFlow() {
           listingRequirements: {
             titleDocumentFileName: formData.titleDocumentFile ? formData.titleDocumentFile.name : '',
             titleDocumentFileType: formData.titleDocumentFile ? formData.titleDocumentFile.type : '',
-            physicalConditionDescription: formData.landDetails?.topography || '',
+            physicalConditionDescription: formData.landDetails?.topography || 'Standard land plot',
             photos: formData.photos || [],
-            locationPin: formData.landDetails?.locationPin || '',
+            locationPin: formData.googlePinLink || formData.landDetails?.locationPin || '',
           },
           landDetails: formData.landDetails,
           metrics: { views: 0, saves: 0, inquiries: 0 }
@@ -401,7 +442,11 @@ export default function ListPropertyFlow() {
           propertyCategory: 'Building',
           title: generatedTitle,
           type: formData.propertyType || 'House',
-          price: cleanPrice,
+          price: sale,
+          askingPrice: ask,
+          salePrice: sale,
+          priceDifferencePercent: diffPercent,
+          priceTag: tag,
           location: `${formData.lga || ''}, ${formData.state || ''}`,
           status: 'Agent Bidding',
           submittedAt: now,
@@ -428,11 +473,23 @@ export default function ListPropertyFlow() {
             titleDocumentFileName: formData.titleDocumentFile ? formData.titleDocumentFile.name : '',
             titleDocumentFileType: formData.titleDocumentFile ? formData.titleDocumentFile.type : '',
             physicalConditionDescription: formData.listingRequirements?.physicalConditionDescription || 'Verifiable physical asset with documented standard features and clear estate boundaries.',
-          photos: formData.listingRequirements?.photos || [],
-          locationPin: formData.googlePinLink || formData.listingRequirements?.locationPin || '',
-        },
-        metrics: { views: 0, saves: 0, inquiries: 0 }
-      };
+            photos: formData.listingRequirements?.photos || [],
+            locationPin: formData.googlePinLink || formData.listingRequirements?.locationPin || '',
+          },
+          metrics: { views: 0, saves: 0, inquiries: 0 }
+        };
+      }
+
+      if (formData.isDraft) {
+        if (drafts.length >= 3) {
+          setDraftError("You have exceeded the saved drafts limit. A maximum of 3 drafts is allowed at any time. Please publish or delete existing drafts in your Seller workspace to continue saving.");
+          return;
+        }
+        finalRequest.status = 'Draft';
+        finalRequest.isDraft = true;
+        await saveDraft(finalRequest);
+        setDraftSaved(true);
+        return;
       }
 
       await addListingRequest(finalRequest);
@@ -442,6 +499,47 @@ export default function ListPropertyFlow() {
       console.error("Failed to submit property listing:", err);
     }
   };
+
+  if (draftSaved) {
+    return (
+      <div className="min-h-screen bg-brand-gray dark:bg-[#1c1c21] p-6 animate-fadeIn">
+        <div className="max-w-2xl mx-auto bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 p-8 shadow-brutal-md text-center my-12">
+          <div className="w-16 h-16 bg-blue-500 text-white border-4 border-brand-black dark:border-zinc-700 flex items-center justify-center rounded-none mx-auto mb-6">
+            <CheckCircle size={32} />
+          </div>
+          
+          <h2 className="text-3xl font-display font-black uppercase tracking-tight mb-2 dark:text-white">Draft Saved!</h2>
+          <span className="bg-blue-400 border-2 border-brand-black dark:border-zinc-750 text-brand-black px-3 py-1 text-xs font-black uppercase tracking-wider inline-block mb-6">
+            WORKSPACE DRAFT PRESERVED
+          </span>
+
+          <p className="text-sm text-zinc-600 dark:text-zinc-400 font-bold uppercase tracking-tight mb-4 leading-relaxed max-w-md mx-auto">
+            Your draft <span className="text-brand-black dark:text-white italic">"{submittedRequestTitle}"</span> has been successfully saved to your workspace drafts.
+          </p>
+          <p className="text-xs text-zinc-400 font-bold uppercase tracking-tight mb-8 leading-relaxed max-w-sm mx-auto">
+            You can access, update, edit, delete, or promote this draft to a live listing at any time from your Space Dashboard.
+          </p>
+          
+          <div className="flex flex-col sm:flex-row gap-4">
+            <button
+              onClick={() => {
+                setActiveTab('myspace');
+              }}
+              className="brutalist-button-teal flex-1 py-4 text-xs font-black uppercase tracking-wider shadow-brutal-xs"
+            >
+              Go to My Space
+            </button>
+            <button
+              onClick={onBack}
+              className="brutalist-button-black flex-1 py-4 text-xs font-black uppercase tracking-wider shadow-brutal-xs"
+            >
+              Return to Marketplace
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (submitted) {
     return (
@@ -486,11 +584,75 @@ export default function ListPropertyFlow() {
 
     // Both gates checked and paid successfully.
   if (listingCategory === 'Building') {
-    return <BuildingListingForm onSubmit={handleListingSubmit} />;
+    return (
+      <>
+        <BuildingListingForm onSubmit={handleListingSubmit} onBack={() => setListingCategory(null)} />
+        {/* Custom modal overlays for draft errors */}
+        <AnimatePresence>
+          {draftError && (
+            <div className="fixed inset-0 bg-brand-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="w-full max-w-md bg-white dark:bg-zinc-900 border-4 border-brand-red p-6 shadow-brutal-lg"
+              >
+                <div className="flex items-center gap-3 text-brand-red mb-3">
+                  <ShieldAlert size={32} />
+                  <h3 className="text-xl font-display font-black uppercase tracking-tight">DRAFT LIMIT EXCEEDED</h3>
+                </div>
+                <p className="text-xs font-bold text-zinc-600 dark:text-zinc-350 uppercase leading-relaxed mb-6">
+                  {draftError}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setDraftError(null)}
+                  className="w-full brutalist-button-black py-3 text-xs font-black uppercase"
+                >
+                  Understand
+                </button>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+      </>
+    );
   }
 
   if (listingCategory === 'Land') {
-    return <LandListingForm onSubmit={handleListingSubmit} />;
+    return (
+      <>
+        <LandListingForm onSubmit={handleListingSubmit} onBack={() => setListingCategory(null)} />
+        {/* Custom modal overlays for draft errors */}
+        <AnimatePresence>
+          {draftError && (
+            <div className="fixed inset-0 bg-brand-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="w-full max-w-md bg-white dark:bg-zinc-900 border-4 border-brand-red p-6 shadow-brutal-lg"
+              >
+                <div className="flex items-center gap-3 text-brand-red mb-3">
+                  <ShieldAlert size={32} />
+                  <h3 className="text-xl font-display font-black uppercase tracking-tight">DRAFT LIMIT EXCEEDED</h3>
+                </div>
+                <p className="text-xs font-bold text-zinc-600 dark:text-zinc-350 uppercase leading-relaxed mb-6">
+                  {draftError}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setDraftError(null)}
+                  className="w-full brutalist-button-black py-3 text-xs font-black uppercase"
+                >
+                  Understand
+                </button>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+      </>
+    );
   }
 
   return (
@@ -506,35 +668,30 @@ export default function ListPropertyFlow() {
       </div>
 
       <div className="max-w-2xl mx-auto">
-        <h1 className="text-4xl font-display font-black uppercase tracking-tighter mb-2 dark:text-white">WHAT ARE YOU LISTING?</h1>
-        <p className="text-sm font-bold uppercase text-zinc-500 mb-8 tracking-tight">Choose a category to begin. Each listing type has its own verified submission process.</p>
+        <h1 className="text-4xl font-display font-black uppercase tracking-tighter mb-8 dark:text-white">WHAT ARE YOU LISTING?</h1>
 
-        <div className="flex flex-col gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <button 
             onClick={() => setListingCategory('Building')}
-            className="flex flex-col text-left p-6 bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 shadow-brutal-md hover:translate-x-1 hover:-translate-y-1 hover:shadow-brutal-lg transition-all"
+            className="flex items-center gap-4 p-6 border-4 border-brand-black dark:border-zinc-700 bg-white dark:bg-zinc-800 text-left transition-all hover:-translate-y-1 hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:hover:shadow-[4px_4px_0px_0px_#52525b]"
           >
-            <div className="w-12 h-12 bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center border-2 border-brand-black dark:border-zinc-700 mb-4">
-              <Building2 size={24} className="text-brand-black dark:text-white" />
+            <div className="p-4 bg-brand-black text-white shrink-0">
+              <Home size={24} />
             </div>
-            <h2 className="text-2xl font-display font-black uppercase tracking-tight mb-2 dark:text-white">BUILDING</h2>
-            <p className="text-xs font-bold uppercase text-zinc-600 dark:text-zinc-400 mb-4">Houses, duplexes, apartments, bungalows, and commercial properties.</p>
-            <div className="flex gap-2 flex-wrap">
-               <span className="text-[10px] items-center font-black uppercase tracking-widest bg-zinc-100 dark:bg-zinc-800 px-2 py-1 text-zinc-600 dark:text-zinc-400 border border-brand-black/20 dark:border-zinc-700">Sale · Rent · Fully-detached · Duplex · Apartment</span>
+            <div>
+              <h3 className="font-display font-black italic uppercase tracking-tighter text-xl dark:text-white">BUILDING</h3>
             </div>
           </button>
 
           <button 
             onClick={() => setListingCategory('Land')}
-            className="flex flex-col text-left p-6 bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 shadow-brutal-md hover:translate-x-1 hover:-translate-y-1 hover:shadow-brutal-lg transition-all"
+            className="flex items-center gap-4 p-6 border-4 border-brand-black dark:border-zinc-700 bg-white dark:bg-zinc-800 text-left transition-all hover:-translate-y-1 hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:hover:shadow-[4px_4px_0px_0px_#52525b]"
           >
-            <div className="w-12 h-12 bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center border-2 border-brand-black dark:border-zinc-700 mb-4">
-              <Map size={24} className="text-brand-black dark:text-white" />
+            <div className="p-4 bg-brand-black text-white shrink-0">
+              <Trees size={24} />
             </div>
-            <h2 className="text-2xl font-display font-black uppercase tracking-tight mb-2 dark:text-white">LAND</h2>
-            <p className="text-xs font-bold uppercase text-zinc-600 dark:text-zinc-400 mb-4">Plots, acres, and undeveloped land. Requires survey plan and size declaration.</p>
-            <div className="flex gap-2 flex-wrap">
-               <span className="text-[10px] items-center font-black uppercase tracking-widest bg-brand-teal/20 px-2 py-1 text-brand-black dark:text-brand-teal border border-brand-black/20 dark:border-zinc-700">Residential · Commercial · Mixed Use · Agricultural</span>
+            <div>
+              <h3 className="font-display font-black italic uppercase tracking-tighter text-xl dark:text-white">LAND</h3>
             </div>
           </button>
         </div>

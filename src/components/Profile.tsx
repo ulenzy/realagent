@@ -2334,7 +2334,7 @@ export default function Profile({
                             linkedin: e.target.value,
                           })
                         }
-                        className="brutalist-input h-12 pl-10 text-xs bg-[#dadcd8] dark:bg-zinc-800 border-zinc-800 dark:border-zinc-700 text-brand-black dark:text-white w-full placeholder:text-zinc-500 dark:placeholder:text-zinc-400"
+                        className="brutalist-input h-12 !pl-10 text-xs bg-[#dadcd8] dark:bg-zinc-800 border-zinc-800 dark:border-zinc-700 text-brand-black dark:text-white w-full placeholder:text-zinc-500 dark:placeholder:text-zinc-400"
                         placeholder="linkedin.com/in/username"
                       />
                     </div>
@@ -4183,6 +4183,12 @@ function StatusBadge({ status }: { status: ListingStatus }) {
       bg: "bg-zinc-100 dark:bg-zinc-800",
       text: "text-zinc-500",
       border: "border-zinc-300 dark:border-zinc-600",
+    },
+    Draft: {
+      icon: <Clock size={10} />,
+      bg: "bg-amber-100 dark:bg-amber-900/30",
+      text: "text-amber-600 dark:text-amber-400",
+      border: "border-amber-400/50",
     },
     "Agent Bidding": {
       icon: <Dices size={10} />,

@@ -288,7 +288,7 @@ export default function PropertyDetail({
             </div>
 
             <div className="bg-brand-black text-white p-6 border-4 border-brand-teal flex flex-col gap-4 shadow-aggressive">
-              <div className="flex justify-between items-end">
+              <div className="flex flex-col sm:flex-row justify-between sm:items-end gap-3">
                 <div>
                   <div className="flex items-center gap-2 mb-1">
                     <p className="text-[10px] font-black uppercase text-zinc-400">Current Market Value (FOR {property.listingType})</p>
@@ -309,6 +309,48 @@ export default function PropertyDetail({
                   {property.type === 'Land' ? `${formatCurrency(pricePerSqm)}/SQM` : property.type}
                 </div>
               </div>
+
+              {/* Distress/Dual Pricing Valuation Container */}
+              {(() => {
+                const isDistress = property.priceTag === 'Distress Sale' || property.priceTag === 'Super-Distress Sale' || property.isDistressDeal;
+                if (!isDistress) return null;
+                const askingVal = property.askingPrice || (property.price * 1.25);
+                const saleVal = property.salePrice || property.price;
+                const priceDiff = askingVal - saleVal;
+                const percentDiff = askingVal > 0 ? Math.round((priceDiff / askingVal) * 100) : 0;
+                
+                return (
+                  <div className="bg-yellow-400 dark:bg-yellow-500 text-brand-black p-4 border-2 border-white/30 shadow-brutal-xs flex flex-col md:flex-row justify-between items-center gap-4 animate-fadeIn">
+                    <div className="flex items-center gap-3">
+                      <div className="p-3 bg-brand-black text-white shrink-0">
+                        <Zap size={24} className="fill-yellow-400 text-yellow-400 animate-pulse border-none" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-display font-black uppercase tracking-tight leading-none mb-1">
+                          {property.priceTag || 'Distress Deal'} detected
+                        </h4>
+                        <p className="text-[9px] uppercase font-bold tracking-tight text-brand-black/75">
+                          Priced significantly below verified physical asset market valuation.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center justify-between md:justify-end gap-3 md:gap-6 w-full md:w-auto border-t md:border-t-0 md:border-l border-brand-black/20 pt-3 md:pt-0 md:pl-6 leading-none">
+                      <div>
+                        <span className="text-[8px] font-black uppercase text-zinc-700 block tracking-wider mb-1">Asking Price</span>
+                        <span className="text-xs font-black line-through">₦ {formatCurrency(askingVal)}</span>
+                      </div>
+                      <div>
+                        <span className="text-[8px] font-black uppercase text-zinc-750 block tracking-wider mb-1">Sale Price</span>
+                        <span className="text-md font-display font-black">₦ {formatCurrency(saleVal)}</span>
+                      </div>
+                      <div className="bg-brand-black text-yellow-400 px-2 py-1.5 font-display font-black text-xs uppercase tracking-tight shadow-brutal-xs">
+                        {percentDiff > 0 ? `-${percentDiff}%` : 'Distress'}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               <div className="grid grid-cols-3 gap-4 border-t border-zinc-800 pt-4">
                 <div className="flex flex-col">
                   <span className="text-[10px] font-black uppercase text-zinc-500">{property.propertyCategory === 'Land' ? 'Land Size' : 'Size'}</span>
@@ -437,14 +479,14 @@ export default function PropertyDetail({
                     <label className="text-[10px] font-black uppercase text-zinc-500">Pick a Date</label>
                     <div className="relative">
                       <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={16} />
-                      <input type="date" className="w-full pl-10 p-3 border-2 border-brand-black dark:border-zinc-700 bg-white dark:bg-zinc-900 text-brand-black dark:text-white font-display font-bold text-sm focus:outline-none focus:ring-2 focus:ring-brand-teal" />
+                      <input type="date" className="w-full !pl-10 p-3 border-2 border-brand-black dark:border-zinc-700 bg-white dark:bg-zinc-900 text-brand-black dark:text-white font-display font-bold text-sm focus:outline-none focus:ring-2 focus:ring-brand-teal" />
                     </div>
                   </div>
                   <div className="flex flex-col gap-1">
                     <label className="text-[10px] font-black uppercase text-zinc-500">Preferred Time</label>
                     <div className="relative">
                       <Clock className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={16} />
-                      <select className="w-full pl-10 p-3 border-2 border-brand-black dark:border-zinc-700 bg-white dark:bg-zinc-900 text-brand-black dark:text-white font-display font-bold text-sm focus:outline-none focus:ring-2 focus:ring-brand-teal appearance-none">
+                      <select className="w-full !pl-10 p-3 border-2 border-brand-black dark:border-zinc-700 bg-white dark:bg-zinc-900 text-brand-black dark:text-white font-display font-bold text-sm focus:outline-none focus:ring-2 focus:ring-brand-teal appearance-none">
                         <option>Morning (9AM - 12PM)</option>
                         <option>Afternoon (12PM - 4PM)</option>
                         <option>Evening (4PM - 6PM)</option>

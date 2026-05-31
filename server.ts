@@ -13,6 +13,44 @@ async function startServer() {
   app.use(express.json());
 
   // API route first
+  app.post('/api/generate-land-title', async (req, res) => {
+    const { landUse, landSize, state } = req.body;
+    if (!landUse || !landSize) {
+      return res.status(400).json({ error: 'landUse and landSize are required' });
+    }
+    try {
+      const key = process.env.GEMINI_API_KEY;
+      if (!key) {
+        return res.json({ title: `${landSize}SQM ${landUse} Land — ${state || 'Abuja'}` });
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey: key,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.5-flash',
+        contents: `Generate a concise Nigerian real estate listing title for a ${landUse} land plot of ${landSize} SQM located in ${state || 'Abuja'}, Nigeria. Return only the title string, no explanation, max 60 characters.`,
+      });
+
+      const title = response.text?.trim().replace(/^["']|["']$/g, '') || `${landSize}SQM ${landUse} Land — ${state || 'Abuja'}`;
+      res.json({ title });
+    } catch (error: any) {
+      const errorMsg = error?.message || String(error);
+      if (errorMsg.includes('429') || errorMsg.includes('quota') || errorMsg.includes('RESOURCE_EXHAUSTED')) {
+        console.warn('Gemini API rate limit/quota limits reached (429). Utilizing fallback title.');
+      } else {
+        console.warn('Error generating land title:', errorMsg);
+      }
+      res.json({ title: `${landSize}SQM ${landUse} Land — ${state || 'Abuja'}` });
+    }
+  });
+
   app.post('/api/estate-intelligence', async (req, res) => {
     const { lat, lng, propertyType, listingType } = req.body;
     if (lat === undefined || lng === undefined) {
@@ -77,8 +115,13 @@ Return only valid JSON matching this schema, no markdown code blocks, no trailin
         ...result,
         aiGenerated: true
       });
-    } catch (error) {
-      console.error('Error in Express Gemini API:', error);
+    } catch (error: any) {
+      const errorMsg = error?.message || String(error);
+      if (errorMsg.includes('429') || errorMsg.includes('quota') || errorMsg.includes('RESOURCE_EXHAUSTED')) {
+        console.warn('Gemini API rate limit/quota limits reached (429). Utilizing fallback intelligence.');
+      } else {
+        console.warn('Error in Express Gemini API:', errorMsg);
+      }
       res.json({ aiGenerated: false });
     }
   });

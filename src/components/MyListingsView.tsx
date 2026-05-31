@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import {
   PlusCircle,
   Clock,
@@ -126,8 +126,23 @@ export default function MyListingsView() {
     listingRequests = [],
     updateListingRequest,
     addTransaction,
+    drafts = [],
+    promoteDraftToListing,
+    deleteDraft
   } = useAuth();
   const { setIsListingFlow } = useNavigation();
+
+  const [currentTab, setCurrentTab] = useState<'live' | 'drafts'>('live');
+
+  const filteredRequests = useMemo(() => {
+    if (currentTab === 'live') {
+      return listingRequests.filter(req => req.status !== 'Draft');
+    } else {
+      return drafts.map(d => ({ ...d, status: 'Draft' as const }));
+    }
+  }, [listingRequests, drafts, currentTab]);
+
+  const hasAnyListingOrDraft = (listingRequests && listingRequests.length > 0) || (drafts && drafts.length > 0);
 
   const [editingListing, setEditingListing] = useState<string | null>(null);
   const [reviewingId, setReviewingId] = useState<string | null>(null);
@@ -139,6 +154,11 @@ export default function MyListingsView() {
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [renewalError, setRenewalError] = useState<string | null>(null);
   const [renewalSuccessMsg, setRenewalSuccessMsg] = useState<string | null>(null);
+
+  const [correctionListingId, setCorrectionListingId] = useState<string | null>(null);
+  const [correctionCategory, setCorrectionCategory] = useState<'Price Adjustment' | 'Location Correction' | 'Photo Update' | 'Document Update' | 'Description Change' | 'Other'>('Price Adjustment');
+  const [correctionDescription, setCorrectionDescription] = useState<string>('');
+  const [correctionSuccess, setCorrectionSuccess] = useState<boolean>(false);
 
   if (!user) return null;
 
@@ -348,7 +368,7 @@ export default function MyListingsView() {
         </div>
       </div>
 
-      {listingRequests.length === 0 ? (
+      {!hasAnyListingOrDraft ? (
         <div className="py-20 flex flex-col items-center gap-4 text-center bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 p-8 shadow-brutal-sm">
           <div className="w-20 h-20 bg-brand-gray dark:bg-zinc-805 border-4 border-brand-black flex items-center justify-center rounded-full">
             <PlusCircle size={40} className="text-zinc-400" />
@@ -381,6 +401,34 @@ export default function MyListingsView() {
             </span>
           </div>
 
+          {/* Interactive filter tab bar */}
+          <div className="flex gap-2 p-1 bg-zinc-100 dark:bg-zinc-805 border-2 border-brand-black dark:border-zinc-700">
+            <button
+              type="button"
+              onClick={() => setCurrentTab('live')}
+              className={cn(
+                "flex-1 py-2 text-center text-xs font-black uppercase tracking-wider font-display border-2 transition-all shadow-brutal-xs",
+                currentTab === 'live' 
+                  ? "bg-brand-teal text-brand-black border-brand-black" 
+                  : "bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400"
+              )}
+            >
+              Live Listings ({listingRequests.filter(r => r.status !== 'Draft').length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setCurrentTab('drafts')}
+              className={cn(
+                "flex-1 py-2 text-center text-xs font-black uppercase tracking-wider font-display border-2 transition-all shadow-brutal-xs",
+                currentTab === 'drafts' 
+                  ? "bg-brand-teal text-brand-black border-brand-black" 
+                  : "bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400"
+              )}
+            >
+              Saved Drafts ({drafts.length})
+            </button>
+          </div>
+
           {renewalError && (
             <div className="p-4 bg-red-100 border-4 border-brand-black text-brand-red font-black uppercase text-xs shadow-brutal-xs">
               {renewalError}
@@ -393,7 +441,21 @@ export default function MyListingsView() {
             </div>
           )}
 
-          {listingRequests.map((req) => {
+          {currentTab === 'drafts' && drafts.length === 0 ? (
+            <div className="py-12 text-center bg-white dark:bg-zinc-900 border-4 border-dashed border-zinc-300 dark:border-zinc-700 p-8 shadow-brutal-sm">
+              <span className="font-display font-black text-xs uppercase tracking-wider text-zinc-400 dark:text-zinc-500 block mb-2">No drafts found</span>
+              <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-tight">You can save property entries as drafts from the submission modal in host form.</p>
+            </div>
+          ) : null}
+
+          {currentTab === 'live' && listingRequests.filter(r => r.status !== 'Draft').length === 0 ? (
+            <div className="py-12 text-center bg-white dark:bg-zinc-900 border-4 border-dashed border-zinc-300 dark:border-zinc-700 p-8 shadow-brutal-sm">
+              <span className="font-display font-black text-xs uppercase tracking-wider text-zinc-400 dark:text-zinc-500 block mb-2">No live listings found</span>
+              <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-tight">Get started by listing a new property on the platform!</p>
+            </div>
+          ) : null}
+
+          {filteredRequests.map((req) => {
             const daysLeft = Math.ceil(
               (new Date(req.expiresAt || "").getTime() - new Date().getTime()) /
                 (1000 * 60 * 60 * 24),
@@ -402,6 +464,87 @@ export default function MyListingsView() {
             const isEditing = editingListing === req.id;
             const isViewingMetrics = viewingMetrics === req.id;
             const bids = req.agentBids || [];
+
+            if (req.status === 'Draft') {
+              return (
+                <div
+                  key={req.id}
+                  className="bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 p-6 shadow-brutal-sm relative overflow-hidden transition-all duration-300"
+                >
+                  <div className="flex justify-between items-start mb-3">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-[8px] font-black uppercase tracking-widest bg-zinc-200 text-zinc-700 px-1.5 py-0.5 border border-zinc-300">
+                          {req.propertyCategory || 'Property'}
+                        </span>
+                        <span className="text-[8px] font-black uppercase tracking-widest text-zinc-400">
+                          Ref: {req.id.slice(0, 8)}
+                        </span>
+                      </div>
+                      <h3 className="font-display font-black uppercase text-lg leading-tight dark:text-brand-gray mb-1">
+                        {req.title}
+                      </h3>
+                      <p className="text-[10px] font-bold text-zinc-500 flex items-center gap-1">
+                        <MapPin size={10} className="text-zinc-400" />
+                        {req.location || "Location pending"}
+                      </p>
+                    </div>
+                    
+                    <div className="flex flex-col items-end gap-2 ml-4">
+                      {/* Calm slate status badge for DRAFT */}
+                      <span className="px-3 py-1 text-[10px] font-black uppercase tracking-wider bg-zinc-200 text-zinc-700 border-2 border-zinc-300 rounded-none">
+                        DRAFT
+                      </span>
+                      <span className="text-[8px] font-semibold text-zinc-400">
+                        Saved: {req.draftSavedAt ? new Date(req.draftSavedAt).toLocaleDateString() : 'Recently'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-4 border-t-2 border-zinc-100 dark:border-zinc-800 mt-4">
+                    <div>
+                      <p className="text-[8px] font-black uppercase text-zinc-400 tracking-widest leading-none mb-1">
+                        Seller pricing
+                      </p>
+                      <p className="text-lg font-display font-black text-brand-black dark:text-brand-teal leading-none">
+                        ₦ {formatCurrency(req.price)}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await promoteDraftToListing(req.id);
+                          } catch (err: any) {
+                            console.error(err);
+                          }
+                        }}
+                        className="bg-brand-teal text-brand-black border-2 border-brand-black px-4 py-2 text-xs font-black uppercase tracking-wider shadow-brutal-xs hover:bg-brand-black hover:text-brand-teal hover:-translate-y-0.5 active:translate-y-0 transition-all font-display"
+                      >
+                        PUBLISH LIVE
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (confirm("Are you sure you want to delete this draft? This cannot be undone.")) {
+                            try {
+                              await deleteDraft(req.id);
+                            } catch (err: any) {
+                              console.error(err);
+                            }
+                          }
+                        }}
+                        className="bg-brand-red text-white border-2 border-brand-black px-4 py-2 text-xs font-black uppercase tracking-wider shadow-brutal-xs hover:bg-red-700 hover:-translate-y-0.5 active:translate-y-0 transition-all font-display"
+                      >
+                        DELETE DRAFT
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
 
             if (req.status === 'Inactive') {
               const renewalDate = req.monthlyFeeExpiresAt ? new Date(req.monthlyFeeExpiresAt).toLocaleDateString() : 'recently';
@@ -523,9 +666,28 @@ export default function MyListingsView() {
                   )}
                 </AnimatePresence>
 
+                {/* Active pending review requests banner */}
+                {(() => {
+                  const pendingRequests = req.reviewRequests?.filter(r => r.status === 'Pending') || [];
+                  if (pendingRequests.length === 0) return null;
+                  return (
+                    <div className="mb-4 bg-amber-50 dark:bg-amber-950/20 border-l-4 border-amber-500 p-3 flex items-center justify-between animate-fadeIn">
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle size={14} className="text-amber-500 animate-pulse shrink-0" />
+                        <span className="text-[10px] font-black uppercase tracking-tight text-amber-700 dark:text-amber-400">
+                          [{pendingRequests[0].category}] Correction Request Pending...
+                        </span>
+                      </div>
+                      <span className="text-[8px] font-black uppercase text-amber-500 bg-amber-500/10 px-1.5 py-0.5 border border-amber-500/20 italic">
+                        Under Review
+                      </span>
+                    </div>
+                  );
+                })()}
+
                 <div className="flex justify-between items-start mb-3">
                   <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
+                    <div className="flex flex-wrap items-center gap-1.5 mb-1">
                       <span className="text-[8px] font-black uppercase tracking-widest bg-brand-teal/20 text-brand-teal px-1.5 py-0.5 border border-brand-teal/30">
                         {req.type}
                       </span>
@@ -562,7 +724,7 @@ export default function MyListingsView() {
                         </h3>
                         {(req.commission !== undefined ||
                           (req.documents && req.documents.length > 0)) && (
-                          <div className="flex gap-2">
+                          <div className="flex flex-wrap gap-1.5">
                             <span className="text-[8px] font-black uppercase bg-brand-black text-brand-teal px-1 border border-brand-teal">
                               Comm: 5%
                             </span>
@@ -698,7 +860,21 @@ export default function MyListingsView() {
                 </div>
 
                 {req.status !== "Archived" && (
-                  <div className="flex gap-2 mt-4 pt-4 border-t-2 border-zinc-100 dark:border-zinc-800 border-dashed">
+                  <div className="flex flex-col sm:flex-row gap-2 mt-4 pt-4 border-t-2 border-zinc-100 dark:border-zinc-800 border-dashed">
+                    {req.status === 'Approved' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCorrectionListingId(req.id);
+                          setCorrectionCategory('Price Adjustment');
+                          setCorrectionDescription('');
+                          setCorrectionSuccess(false);
+                        }}
+                        className="flex-1 border-2 border-brand-black dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-1.5 text-[10px] font-black uppercase text-brand-black dark:text-brand-teal flex items-center justify-center gap-1.5 shadow-brutal-xs hover:bg-brand-black hover:text-brand-teal transition-all"
+                      >
+                        <AlertTriangle size={12} className="text-amber-500 shrink-0" /> Request Correction
+                      </button>
+                    )}
                     <button className="flex-1 bg-brand-teal text-brand-black border-2 border-brand-black px-3 py-1.5 text-[10px] font-black uppercase hover:bg-brand-black hover:text-brand-teal transition-all">
                       {isExpired ? "Renew Free" : "Extend (₦3,700)"}
                     </button>
@@ -970,6 +1146,143 @@ export default function MyListingsView() {
           </div>
         )}
       </AnimatePresence>
+
+      {/* Request Correction Brutalist Modal */}
+      <AnimatePresence>
+        {correctionListingId && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => {
+                if (!correctionSuccess) setCorrectionListingId(null);
+              }}
+              className="absolute inset-0 bg-brand-black/70 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, y: 50, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 50, scale: 0.95 }}
+              className="bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 w-full max-w-lg relative z-10 p-6 shadow-brutal-lg"
+            >
+              <button
+                onClick={() => setCorrectionListingId(null)}
+                className="absolute top-4 right-4 text-brand-black dark:text-zinc-400 hover:text-brand-red transition-all"
+              >
+                <X size={20} />
+              </button>
+
+              {correctionSuccess ? (
+                <div className="text-center py-6">
+                  <div className="w-12 h-12 bg-emerald-500 text-white border-2 border-brand-black flex items-center justify-center mx-auto mb-4">
+                    <CheckCircle2 size={24} />
+                  </div>
+                  <h3 className="font-display font-black text-xl uppercase tracking-tighter mb-2 dark:text-white">
+                    CORRECTION SUBMITTED
+                  </h3>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 uppercase font-bold leading-relaxed max-w-sm mx-auto">
+                    Your platform correction appeal was registered successfully. Administrators uojemeni15@gmail.com will review your request shortly.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setCorrectionListingId(null)}
+                    className="mt-6 brutalist-button-black w-full py-3 text-xs font-black uppercase"
+                  >
+                    Done
+                  </button>
+                </div>
+              ) : (
+                <form 
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    if (!correctionDescription.trim()) return;
+
+                    const listingToUpdate = listingRequests.find(r => r.id === correctionListingId);
+                    if (!listingToUpdate) return;
+
+                    const activeRequests = listingToUpdate.reviewRequests || [];
+                    const newRequest = {
+                      id: 'rev-' + Date.now(),
+                      category: correctionCategory,
+                      description: correctionDescription,
+                      submittedAt: new Date().toISOString(),
+                      status: 'Pending' as const
+                    };
+
+                    try {
+                      await updateListingRequest?.(correctionListingId, {
+                        reviewRequests: [...activeRequests, newRequest]
+                      });
+                      setCorrectionSuccess(true);
+                      setCorrectionDescription('');
+                    } catch (err) {
+                      console.error("Failed to submit request change:", err);
+                    }
+                  }}
+                  className="space-y-4"
+                >
+                  <div>
+                    <h3 className="font-display font-black text-2xl uppercase tracking-tight dark:text-white">
+                      REQUEST CORRECTION
+                    </h3>
+                    <p className="text-[10px] uppercase font-bold text-zinc-400">
+                      Submit a correction appeal for verification review
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-wider block dark:text-zinc-300">
+                      Select Request Category
+                    </label>
+                    <select
+                      value={correctionCategory}
+                      onChange={(e) => setCorrectionCategory(e.target.value as any)}
+                      className="w-full bg-zinc-50 dark:bg-zinc-800 border-4 border-brand-black dark:border-zinc-700 dark:text-white p-3 font-display font-black uppercase text-xs"
+                    >
+                      {['Price Adjustment', 'Location Correction', 'Photo Update', 'Document Update', 'Description Change', 'Other'].map(cat => (
+                        <option key={cat} value={cat}>
+                          {cat}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-wider block dark:text-zinc-300">
+                      Describe Requested Changes
+                    </label>
+                    <textarea
+                      required
+                      value={correctionDescription}
+                      onChange={(e) => setCorrectionDescription(e.target.value)}
+                      placeholder="Specify precisely what details need updating (e.g. 'Asking Valuation is outdated. Market rates updated. Perfect survey ready...')"
+                      rows={4}
+                      className="w-full bg-zinc-50 dark:bg-zinc-800 border-4 border-brand-black dark:border-zinc-700 dark:text-white p-3 text-xs focus:ring-0 outline-none"
+                    />
+                  </div>
+
+                  <div className="flex gap-4 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setCorrectionListingId(null)}
+                      className="flex-1 bg-white hover:bg-zinc-50 text-zinc-500 border-2 border-zinc-300 dark:border-zinc-700 dark:bg-zinc-850 py-3 text-xs font-black uppercase"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="flex-1 brutalist-button-teal py-3 text-xs font-black uppercase shadow-brutal-xs"
+                    >
+                      Submit Request
+                    </button>
+                  </div>
+                </form>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -984,6 +1297,12 @@ function StatusBadge({ status }: { status: ListingStatus }) {
       bg: "bg-zinc-100 dark:bg-zinc-800",
       text: "text-zinc-500",
       border: "border-zinc-300 dark:border-zinc-600",
+    },
+    Draft: {
+      icon: <Clock size={10} />,
+      bg: "bg-amber-100 dark:bg-amber-900/30",
+      text: "text-amber-600 dark:text-amber-400",
+      border: "border-amber-400/50",
     },
     "Agent Bidding": {
       icon: <Dices size={10} />,
