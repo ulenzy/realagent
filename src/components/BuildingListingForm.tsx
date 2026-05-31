@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   ArrowLeft, ArrowRight, CheckCircle2, Home, Trees, Banknote, Map, Info 
 } from 'lucide-react';
@@ -10,6 +10,7 @@ import DocumentUpload from './shared/DocumentUpload';
 import PhotoUpload from './shared/PhotoUpload';
 
 import { LeafletMap } from './shared/LeafletMap';
+import { useAuth } from '../context/AuthContext';
 
 const defaultEmptyState = {
   title: '',
@@ -51,30 +52,90 @@ export default function BuildingListingForm({
   onBack?: () => void; 
   initialData?: any; 
 }) {
+  const { drafts } = useAuth();
   const [step, setStep] = useState(1);
   const [formData, setFormData] = useState(() => {
-    try {
-      const draft = localStorage.getItem('realagents_building_draft');
-      if (draft) {
-        const parsed = JSON.parse(draft);
-        return {
-          ...defaultEmptyState,
-          ...parsed,
-          titleDocumentFile: null
-        };
-      }
-    } catch (e) {
-      console.warn("Failed to read draft:", e);
-    }
     return { ...defaultEmptyState, ...initialData };
   });
 
-  const [showDraftBanner, setShowDraftBanner] = useState(() => {
-    return !!localStorage.getItem('realagents_building_draft');
-  });
-
+  const [showDraftModal, setShowDraftModal] = useState(false);
+  const [importedDraftId, setImportedDraftId] = useState<string | null>(null);
   const [customAmenity, setCustomAmenity] = useState('');
   const [showPublishModal, setShowPublishModal] = useState(false);
+  const preventSaveRef = useRef(true);
+
+  const localDraft = useMemo(() => {
+    try {
+      const raw = localStorage.getItem('realagents_building_draft');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && (parsed.propertySubType || parsed.state || parsed.address || parsed.sizeSqm || parsed.askingPrice)) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to parse local building draft", e);
+    }
+    return null;
+  }, []);
+
+  const matchingCloudDrafts = useMemo(() => {
+    return drafts.filter(d => d.propertyCategory === 'Building' || d.type !== 'Land');
+  }, [drafts]);
+
+  const availableDrafts = useMemo(() => {
+    const list = [];
+    if (localDraft) {
+      list.push({
+        id: 'local_autosave',
+        title: localDraft.title || (localDraft.propertySubType ? `In-Progress ${localDraft.propertySubType} Draft` : 'In-Progress Auto-Saved Draft'),
+        source: 'Local Auto-Save',
+        data: localDraft,
+        updatedAt: 'Recent (Local)'
+      });
+    }
+    matchingCloudDrafts.forEach(c => {
+      const mappedFormData = {
+        title: c.title || '',
+        propertyType: c.type || 'House',
+        listingType: (c.listingType || 'Sale') as 'Sale' | 'Rent',
+        propertySubType: c.propertySubType || '',
+        price: String(c.price || ''),
+        askingPrice: String(c.askingPrice || ''),
+        salePrice: String(c.salePrice || ''),
+        sizeSqm: String(c.sizeSqm || ''),
+        bedrooms: String(c.bedrooms || '0'),
+        bathrooms: String(c.bathrooms || '0'),
+        estateName: c.estateName || '',
+        amenities: c.amenities || [],
+        state: c.state || c.location?.split(',')[1]?.trim() || '',
+        lga: c.lga || c.location?.split(',')[0]?.trim() || '',
+        address: c.address || '',
+        condition: c.listingRequirements?.physicalConditionDescription || '',
+        yearBuilt: '',
+        parkingSpaces: '',
+        googlePinLink: c.googlePinLink || '',
+        titleDocumentFile: null,
+        photos: c.listingRequirements?.photos || [],
+        listingRequirements: {
+          locationPin: c.googlePinLink || '',
+          titleDocumentFileName: c.listingRequirements?.titleDocumentFileName || '',
+          titleDocumentFileType: c.listingRequirements?.titleDocumentFileType || '',
+          physicalConditionDescription: c.listingRequirements?.physicalConditionDescription || '',
+          photos: c.listingRequirements?.photos || [],
+        }
+      };
+
+      list.push({
+        id: c.id,
+        title: c.title || `${c.bedrooms} Bed ${c.propertySubType || 'Property'} inside ${c.estateName || 'Unknown'}`,
+        source: 'Cloud Draft',
+        data: mappedFormData,
+        updatedAt: c.lastUpdated ? new Date(c.lastUpdated).toLocaleString() : 'Saved Draft'
+      });
+    });
+    return list;
+  }, [localDraft, matchingCloudDrafts]);
 
   const handleNext = () => setStep(s => Math.min(s + 1, 2));
   const handlePrev = () => setStep(s => Math.max(s - 1, 1));
@@ -147,13 +208,11 @@ export default function BuildingListingForm({
     }
   };
 
-  const handleClearDraft = () => {
-    localStorage.removeItem('realagents_building_draft');
-    setFormData(defaultEmptyState);
-    setShowDraftBanner(false);
-  };
-
   useEffect(() => {
+    if (preventSaveRef.current) {
+      preventSaveRef.current = false;
+      return;
+    }
     localStorage.setItem('realagents_building_draft', JSON.stringify(formData));
   }, [formData]);
 
@@ -209,17 +268,40 @@ export default function BuildingListingForm({
             exit={{ opacity: 0, x: -20 }}
             className="flex flex-col gap-6"
           >
-            {showDraftBanner && (
-              <div className="bg-amber-100 dark:bg-amber-950/40 border-2 border-amber-500 text-amber-800 dark:text-amber-200 p-3 flex items-center justify-between font-bold text-xs uppercase tracking-wider shadow-brutal-xs mb-4">
-                <span>Draft restored — tap × to start fresh.</span>
+            {importedDraftId ? (
+              <div className="bg-emerald-100 dark:bg-emerald-950/40 border-2 border-emerald-500 text-emerald-800 dark:text-emerald-200 p-3 flex items-center justify-between font-bold text-xs uppercase tracking-wider shadow-brutal-xs mb-4">
+                <span className="flex items-center gap-1.5">
+                  <CheckCircle2 size={16} className="text-emerald-500 shrink-0" />
+                  Draft restored — tap × to start fresh.
+                </span>
                 <button 
                   type="button" 
-                  onClick={handleClearDraft} 
-                  className="w-6 h-6 border bg-amber-200 dark:bg-amber-805 border-amber-600 flex items-center justify-center font-display font-black text-xs hover:bg-amber-300 dark:hover:bg-amber-700 active:translate-y-0.5"
+                  onClick={() => {
+                    setFormData(defaultEmptyState);
+                    localStorage.removeItem('realagents_building_draft');
+                    setImportedDraftId(null);
+                  }} 
+                  className="w-6 h-6 border bg-emerald-200 dark:bg-emerald-800 border-emerald-500 flex items-center justify-center font-display font-black text-xs hover:bg-emerald-300 dark:hover:bg-emerald-700 active:translate-y-0.5"
                 >
                   ×
                 </button>
               </div>
+            ) : (
+              availableDrafts.length > 0 && (
+                <div className="bg-amber-100 dark:bg-amber-955/40 border-2 border-amber-500 text-amber-800 dark:text-amber-200 p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 font-bold text-xs uppercase tracking-wider shadow-brutal-xs mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 bg-amber-500 rounded-full animate-pulse" />
+                    <span>We found {availableDrafts.length} existing draft(s) available for this listing.</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowDraftModal(true)}
+                    className="px-3 py-1.5 border-2 border-brand-black bg-amber-450 hover:bg-amber-300 text-brand-black font-black text-[10px] shadow-brutal-xs transition-all active:translate-y-0.5"
+                  >
+                    View & Restore Drafts
+                  </button>
+                </div>
+              )
             )}
 
             <h2 className="text-3xl font-display font-black italic uppercase tracking-tighter">
@@ -704,6 +786,95 @@ export default function BuildingListingForm({
                   className="text-xs font-black uppercase text-zinc-500 hover:text-brand-black dark:hover:text-white pl-2"
                 >
                   Cancel
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Available Drafts List Modal */}
+      <AnimatePresence>
+        {showDraftModal && (
+          <div className="fixed inset-0 bg-brand-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-[9999] animate-fadeIn">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-lg bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 p-6 shadow-brutal-lg max-h-[85vh] flex flex-col"
+            >
+              <div className="flex justify-between items-start mb-4">
+                <div>
+                  <h3 className="text-2xl font-display font-black italic uppercase tracking-tighter text-brand-black dark:text-white">
+                    Available Drafts
+                  </h3>
+                  <p className="text-[10px] font-black uppercase text-zinc-400">
+                    Select a draft to import its contents
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowDraftModal(false)}
+                  className="w-8 h-8 border-2 border-brand-black dark:border-zinc-700 bg-white dark:bg-zinc-800 text-brand-black dark:text-white flex items-center justify-center font-display font-black text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700 active:translate-y-0.5"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="overflow-y-auto pr-1 flex-1 space-y-3 my-4">
+                {availableDrafts.map((d) => (
+                  <div 
+                    key={d.id}
+                    onClick={() => {
+                      setFormData(d.data);
+                      setImportedDraftId(d.id);
+                      setShowDraftModal(false);
+                    }}
+                    className="p-4 border-2 border-brand-black dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-brand-teal/10 dark:hover:bg-brand-teal/10 hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-brutal-sm cursor-pointer transition-all flex flex-col gap-1 text-left relative group select-none"
+                  >
+                    <div className="flex justify-between items-start gap-4">
+                      <span className="text-xs font-black dark:text-white capitalize leading-tight group-hover:text-brand-teal transition-colors">
+                        {d.title}
+                      </span>
+                      <span className={cn(
+                        "text-[8px] font-black uppercase px-1.5 py-0.5 border shrink-0",
+                        d.source === 'Local Auto-Save' 
+                          ? "bg-amber-100 border-amber-500 text-amber-800 dark:bg-amber-955/20 dark:text-amber-300 animate-pulse" 
+                          : "bg-blue-100 border-blue-500 text-blue-800 dark:bg-blue-955/20 dark:text-blue-300"
+                      )}>
+                        {d.source}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between items-center text-[9px] font-mono text-zinc-400 dark:text-zinc-500 mt-2">
+                      <span>Last Updated: {d.updatedAt}</span>
+                      <span className="font-sans font-bold uppercase text-[9px] text-brand-teal group-hover:underline flex items-center gap-0.5">
+                        Import Draft &rarr;
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex justify-between items-center mt-4 pt-3 border-t-2 border-zinc-100 dark:border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFormData(defaultEmptyState);
+                    localStorage.removeItem('realagents_building_draft');
+                    setImportedDraftId(null);
+                    setShowDraftModal(false);
+                  }}
+                  className="text-[10px] font-black uppercase text-zinc-500 hover:text-brand-red decoration-2 hover:underline transition-colors"
+                >
+                  Clear all & Start Fresh
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowDraftModal(false)}
+                  className="px-4 py-2 border-2 border-brand-black dark:border-zinc-700 bg-brand-black text-white dark:bg-zinc-800 font-black text-xs uppercase shadow-brutal-sm active:translate-y-0.5"
+                >
+                  Close
                 </button>
               </div>
             </motion.div>
