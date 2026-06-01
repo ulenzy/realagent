@@ -141,6 +141,19 @@ export interface ReviewRequest {
   adminNote?: string;
 }
 
+export interface PropertyChangeRequest {
+  id: string;
+  proposedTitle: string;
+  proposedPrice: number;
+  reason: string;
+  submittedAt: string;
+  status: 'PendingAdmin' | 'Approved' | 'Rejected' | 'NeedsReconfirmation' | 'ReconfirmedPendingReview';
+  physicalReconfirmationRequired?: boolean;
+  requiresPhysicalReconfirmationBy?: string; // 24hr deadline ISO string
+  agentReport?: string;
+  agentReportSubmittedAt?: string;
+}
+
 export interface ListingRequirements {
   titleDocumentFileName: string;       // filename of uploaded title document
   titleDocumentFileType: string;       // mime type of uploaded file
@@ -232,6 +245,7 @@ export interface ListingRequest {
   dealStatus: 'Open' | 'Inspection Paid' | 'Under Offer' | 'Closed' | 'Disputed';
   bidWindowOpensAt?: string;
   bidWindowExpiresAt?: string;
+  propertyChangeRequest?: PropertyChangeRequest;
 }
 
 export interface Message {

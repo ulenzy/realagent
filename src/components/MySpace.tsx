@@ -4,14 +4,22 @@ import WishlistView from './WishlistView';
 import MyListingsView from './MyListingsView';
 import AgentBidding from './AgentBidding';
 import LeaderboardView from './LeaderboardView';
+import { useAuth } from '../context/AuthContext';
 
 interface MySpaceProps {
   defaultActiveSubTab: 'Wishlist' | 'My Listings' | 'Bids' | 'Leaderboard';
 }
 
 export default function MySpace({ defaultActiveSubTab }: MySpaceProps) {
+  const { user } = useAuth();
+  const isAgentUser = user?.isAgent === true || user?.role === 'Agent' || user?.role === 'Admin';
+
+  const initialTab = (defaultActiveSubTab === 'Bids' || defaultActiveSubTab === 'Leaderboard') && !isAgentUser
+    ? 'Wishlist'
+    : defaultActiveSubTab;
+
   const [activeSubTab, setActiveSubTab] = useState<'Wishlist' | 'My Listings' | 'Bids' | 'Leaderboard'>(
-    defaultActiveSubTab === 'Leaderboard' ? 'Leaderboard' : defaultActiveSubTab
+    initialTab === 'Leaderboard' ? 'Leaderboard' : initialTab
   );
 
   return (
@@ -44,30 +52,34 @@ export default function MySpace({ defaultActiveSubTab }: MySpaceProps) {
               <FileText size={16} />
               My Listings
             </button>
-            <button
-              id="myspace-tab-bids"
-              onClick={() => setActiveSubTab('Bids')}
-              className={`flex-1 flex items-center justify-center gap-2 py-3 px-3 text-xs font-black uppercase tracking-wide border-2 border-brand-black transition-all ${
-                activeSubTab === 'Bids'
-                  ? 'bg-brand-teal text-brand-black font-extrabold translate-y-0.5 shadow-none'
-                  : 'bg-white dark:bg-zinc-800 text-brand-black dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-700 shadow-brutal-xs'
-              }`}
-            >
-              <Gavel size={16} />
-              Bids
-            </button>
-            <button
-              id="myspace-tab-leaderboard"
-              onClick={() => setActiveSubTab('Leaderboard')}
-              className={`flex-1 flex items-center justify-center gap-2 py-3 px-3 text-xs font-black uppercase tracking-wide border-2 border-brand-black transition-all ${
-                activeSubTab === 'Leaderboard'
-                  ? 'bg-brand-teal text-brand-black font-extrabold translate-y-0.5 shadow-none'
-                  : 'bg-white dark:bg-zinc-800 text-brand-black dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-700 shadow-brutal-xs'
-              }`}
-            >
-              <Trophy size={16} />
-              Leaderboard
-            </button>
+            {isAgentUser && (
+              <button
+                id="myspace-tab-bids"
+                onClick={() => setActiveSubTab('Bids')}
+                className={`flex-1 flex items-center justify-center gap-2 py-3 px-3 text-xs font-black uppercase tracking-wide border-2 border-brand-black transition-all ${
+                  activeSubTab === 'Bids'
+                    ? 'bg-brand-teal text-brand-black font-extrabold translate-y-0.5 shadow-none'
+                    : 'bg-white dark:bg-zinc-800 text-brand-black dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-700 shadow-brutal-xs'
+                }`}
+              >
+                <Gavel size={16} />
+                Bids
+              </button>
+            )}
+            {isAgentUser && (
+              <button
+                id="myspace-tab-leaderboard"
+                onClick={() => setActiveSubTab('Leaderboard')}
+                className={`flex-1 flex items-center justify-center gap-2 py-3 px-3 text-xs font-black uppercase tracking-wide border-2 border-brand-black transition-all ${
+                  activeSubTab === 'Leaderboard'
+                    ? 'bg-brand-teal text-brand-black font-extrabold translate-y-0.5 shadow-none'
+                    : 'bg-white dark:bg-zinc-800 text-brand-black dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-700 shadow-brutal-xs'
+                }`}
+              >
+                <Trophy size={16} />
+                Leaderboard
+              </button>
+            )}
           </div>
         </div>
       </div>

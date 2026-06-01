@@ -23,6 +23,7 @@ import { useNavigation } from "../context/NavigationContext";
 import { ListingStatus, ListingRequest } from "../types";
 import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
 import { db } from "../lib/firebase";
+import { sendNotification } from "../lib/notifications";
 import {
   formatCurrency,
   parseFormattedNumber,
@@ -159,6 +160,19 @@ export default function MyListingsView() {
   const [correctionCategory, setCorrectionCategory] = useState<'Price Adjustment' | 'Location Correction' | 'Photo Update' | 'Document Update' | 'Description Change' | 'Other'>('Price Adjustment');
   const [correctionDescription, setCorrectionDescription] = useState<string>('');
   const [correctionSuccess, setCorrectionSuccess] = useState<boolean>(false);
+
+  // Property Listing Change Request States
+  const [changeRequestListingId, setChangeRequestListingId] = useState<string | null>(null);
+  const [changeRequestProposedTitle, setChangeRequestProposedTitle] = useState<string>('');
+  const [changeRequestProposedPrice, setChangeRequestProposedPrice] = useState<string>('');
+  const [changeRequestReason, setChangeRequestReason] = useState<string>('');
+  const [changeSuccess, setChangeSuccess] = useState<boolean>(false);
+  const [reconfirmationReport, setReconfirmationReport] = useState<string>('');
+
+  // Inline review request panel states
+  const [expandedReviewListingId, setExpandedReviewListingId] = useState<string | null>(null);
+  const [selectedReviewCategory, setSelectedReviewCategory] = useState<string>('');
+  const [reviewDescriptionText, setReviewDescriptionText] = useState<string>('');
 
   if (!user) return null;
 
@@ -464,6 +478,7 @@ export default function MyListingsView() {
             const isEditing = editingListing === req.id;
             const isViewingMetrics = viewingMetrics === req.id;
             const bids = req.agentBids || [];
+            const hasPendingReview = (req.reviewRequests || []).some(review => review.status === 'Pending');
 
             if (req.status === 'Draft') {
               return (
@@ -685,6 +700,147 @@ export default function MyListingsView() {
                   );
                 })()}
 
+                {/* Property Listings Change Request Status Banner */}
+                {req.propertyChangeRequest && (() => {
+                  const pcr = req.propertyChangeRequest;
+                  const getRemainingTime = (deadline?: string) => {
+                    if (!deadline) return "24 hours remaining";
+                    const diff = new Date(deadline).getTime() - Date.now();
+                    if (diff <= 0) return "DEADLINE EXPIRED";
+                    const hours = Math.floor(diff / (3600 * 1000));
+                    const minutes = Math.floor((diff % (3600 * 1000)) / (60 * 1000));
+                    return `${hours}h ${minutes}m remaining`;
+                  };
+
+                  return (
+                    <div className="mb-4 border-2 border-brand-black dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 p-4 shadow-brutal-xs space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b-2 border-dashed border-zinc-200 dark:border-zinc-700 pb-2">
+                        <div className="flex items-center gap-1.5">
+                          <AlertTriangle size={15} className="text-brand-teal fill-zinc-900 shrink-0" />
+                          <span className="text-xs font-black uppercase tracking-tight text-brand-black dark:text-white">
+                            Listing Change Request
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          {pcr.status === 'PendingAdmin' && (
+                            <span className="text-[8px] font-black uppercase px-2 py-0.5 bg-amber-400 text-black border border-black italic animate-pulse">
+                              Pending Admin Approval
+                            </span>
+                          )}
+                          {pcr.status === 'NeedsReconfirmation' && (
+                            <span className="text-[8px] font-black uppercase px-2 py-0.5 bg-brand-red text-white border border-black italic animate-pulse">
+                              Reconfirmation Required (24H Task)
+                            </span>
+                          )}
+                          {pcr.status === 'ReconfirmedPendingReview' && (
+                            <span className="text-[8px] font-black uppercase px-2 py-0.5 bg-brand-teal text-brand-black border border-black italic">
+                              Reconfirmed - Pending Final Review
+                            </span>
+                          )}
+                          {pcr.status === 'Approved' && (
+                            <span className="text-[8px] font-black uppercase px-2 py-0.5 bg-emerald-500 text-white border border-black italic">
+                              Request Approved
+                            </span>
+                          )}
+                          {pcr.status === 'Rejected' && (
+                            <span className="text-[8px] font-black uppercase px-2 py-0.5 bg-brand-red text-white border border-black italic">
+                              Request Rejected
+                            </span>
+                          )}
+                          
+                          {(pcr.status === 'Approved' || pcr.status === 'Rejected') && (
+                            <button
+                              onClick={async () => {
+                                try {
+                                  await updateListingRequest?.(req.id, { propertyChangeRequest: undefined });
+                                } catch (err) {
+                                  console.error("Failed to dismiss PCR status:", err);
+                                }
+                              }}
+                              className="text-[10px] font-black border border-black px-1.5 bg-white text-zinc-600 hover:bg-brand-red hover:text-white transition-all ml-1.5 dark:text-black hover:cursor-pointer"
+                              title="Dismiss Banner"
+                            >
+                              ×
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="text-[10px] text-zinc-600 dark:text-zinc-300 font-bold space-y-1">
+                        <div>
+                          <span className="font-bold uppercase text-brand-black dark:text-white opacity-60">Proposed Title: </span>
+                          <span className="font-mono text-xs text-brand-black dark:text-white">{pcr.proposedTitle}</span>
+                        </div>
+                        <div>
+                          <span className="font-bold uppercase text-brand-black dark:text-white opacity-60">Proposed Price: </span>
+                          <span className="font-mono text-xs text-brand-black dark:text-white">{formatCurrency(pcr.proposedPrice)}</span>
+                        </div>
+                        <div>
+                          <span className="font-bold uppercase text-brand-black dark:text-white opacity-60">Reason: </span>
+                          <span className="italic">"{pcr.reason}"</span>
+                        </div>
+                      </div>
+
+                      {pcr.status === 'NeedsReconfirmation' && (
+                        <div className="pt-2 border-t-2 border-dashed border-zinc-200 dark:border-zinc-700 space-y-2 font-black uppercase">
+                          <div className="flex justify-between items-center bg-brand-red/10 text-brand-red p-2 border border-brand-red/20 font-mono text-xs">
+                            <span>Time Limit:</span>
+                            <span className="animate-pulse">{getRemainingTime(pcr.requiresPhysicalReconfirmationBy)}</span>
+                          </div>
+
+                          <div className="space-y-1.5 normal-case">
+                            <label className="block text-[10px] font-black uppercase text-brand-black dark:text-white">
+                              Site Findings Report (Write details after visiting property)
+                            </label>
+                            <textarea
+                              rows={2}
+                              value={reconfirmationReport}
+                              onChange={(e) => setReconfirmationReport(e.target.value)}
+                              placeholder="Type your physical site visit findings report here to submit back to admin..."
+                              className="w-full text-xs font-bold p-2 border-2 border-brand-black dark:border-zinc-700 bg-white dark:bg-zinc-900 dark:text-white"
+                            />
+                            <button
+                              onClick={async () => {
+                                if (!reconfirmationReport.trim()) {
+                                  alert("Please provide the physical site visit findings text.");
+                                  return;
+                                }
+                                try {
+                                  await updateListingRequest?.(req.id, {
+                                    propertyChangeRequest: {
+                                      ...pcr,
+                                      status: 'ReconfirmedPendingReview',
+                                      agentReport: reconfirmationReport,
+                                      agentReportSubmittedAt: new Date().toISOString()
+                                    }
+                                  });
+                                  alert("Physical site reconfirmation report submitted back to admin successfully!");
+                                  setReconfirmationReport('');
+                                } catch (err) {
+                                  console.error("Failed to submit reconfirmation report:", err);
+                                }
+                              }}
+                              className="w-full brutalist-button-teal py-1.5 text-xs font-black uppercase text-center bg-brand-teal text-brand-black hover:bg-brand-teal-light transition-all cursor-pointer"
+                            >
+                              Submit Site Reconfirmation Report
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {pcr.status === 'ReconfirmedPendingReview' && pcr.agentReport && (
+                        <div className="pt-2 border-t border-zinc-200 dark:border-zinc-700 text-[10px] bg-brand-teal/5 border border-brand-teal/20 text-indigo-900 dark:text-brand-teal p-2 rounded-none">
+                          <div className="font-black uppercase mb-1">Your Submitted Field Findings:</div>
+                          <p className="italic font-bold">"{pcr.agentReport}"</p>
+                          <p className="font-mono text-[8px] text-zinc-500 mt-1">
+                            Submitted At: {pcr.agentReportSubmittedAt ? new Date(pcr.agentReportSubmittedAt).toLocaleString() : ''}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 <div className="flex justify-between items-start mb-3">
                   <div className="flex-1">
                     <div className="flex flex-wrap items-center gap-1.5 mb-1">
@@ -810,19 +966,28 @@ export default function MyListingsView() {
                       </>
                     ) : (
                       <>
-                        <button
-                          onClick={() => {
-                            setEditingListing(req.id);
-                            setEditFormData({
-                              title: req.title,
-                              price: formatNumberString(req.price.toString()),
-                            });
-                          }}
-                          className="p-2 border-2 border-zinc-200 text-zinc-400 hover:border-brand-black hover:text-brand-black dark:border-zinc-800 transition-all"
-                          title="Edit Listing"
-                        >
-                          <Edit3 size={16} />
-                        </button>
+                        {hasPendingReview ? (
+                          <span className="text-[10px] font-black uppercase tracking-tight text-zinc-500 bg-zinc-50 dark:bg-zinc-805 border-2 border-zinc-200 dark:border-zinc-700 px-2.5 py-1.5 leading-tight select-none italic">
+                            Review request pending — await admin response before submitting another.
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              if (expandedReviewListingId === req.id) {
+                                setExpandedReviewListingId(null);
+                              } else {
+                                setExpandedReviewListingId(req.id);
+                                setSelectedReviewCategory('');
+                                setReviewDescriptionText('');
+                              }
+                            }}
+                            className="px-3 py-1.5 border-2 border-zinc-300 hover:border-zinc-800 dark:border-zinc-700 dark:hover:border-zinc-500 text-zinc-700 dark:text-zinc-300 text-xs font-black uppercase flex items-center gap-1.5 transition-all cursor-pointer"
+                            title="Request Review"
+                          >
+                            <Edit3 size={12} />
+                            <span>Request Review</span>
+                          </button>
+                        )}
                         <button
                           onClick={() => setViewingMetrics(req.id)}
                           className="p-2 border-2 border-zinc-200 text-zinc-400 hover:border-brand-black hover:text-brand-black dark:border-zinc-800 transition-all"
@@ -861,20 +1026,6 @@ export default function MyListingsView() {
 
                 {req.status !== "Archived" && (
                   <div className="flex flex-col sm:flex-row gap-2 mt-4 pt-4 border-t-2 border-zinc-100 dark:border-zinc-800 border-dashed">
-                    {req.status === 'Approved' && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setCorrectionListingId(req.id);
-                          setCorrectionCategory('Price Adjustment');
-                          setCorrectionDescription('');
-                          setCorrectionSuccess(false);
-                        }}
-                        className="flex-1 border-2 border-brand-black dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-1.5 text-[10px] font-black uppercase text-brand-black dark:text-brand-teal flex items-center justify-center gap-1.5 shadow-brutal-xs hover:bg-brand-black hover:text-brand-teal transition-all"
-                      >
-                        <AlertTriangle size={12} className="text-amber-500 shrink-0" /> Request Correction
-                      </button>
-                    )}
                     <button className="flex-1 bg-brand-teal text-brand-black border-2 border-brand-black px-3 py-1.5 text-[10px] font-black uppercase hover:bg-brand-black hover:text-brand-teal transition-all">
                       {isExpired ? "Renew Free" : "Extend (₦3,700)"}
                     </button>
@@ -1040,6 +1191,214 @@ export default function MyListingsView() {
                     )}
                   </div>
                 )}
+
+                {/* Inline Expansion Review Request Panel */}
+                <AnimatePresence>
+                  {expandedReviewListingId === req.id && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.25, ease: "easeInOut" }}
+                      className="overflow-hidden mt-4 pt-4 border-t-2 border-zinc-200 dark:border-zinc-800 border-dashed"
+                    >
+                      <div className="bg-zinc-50 dark:bg-zinc-950 p-4 border-2 border-brand-black dark:border-zinc-700 space-y-4">
+                        <div className="flex items-center justify-between border-b-2 border-dashed border-zinc-200 dark:border-zinc-700 pb-2">
+                          <h4 className="font-display font-black text-xs uppercase tracking-tight dark:text-white">
+                            NEW REVIEW REQUEST
+                          </h4>
+                          <button
+                            onClick={() => {
+                              setExpandedReviewListingId(null);
+                              setSelectedReviewCategory('');
+                              setReviewDescriptionText('');
+                            }}
+                            className="text-[10px] font-black text-zinc-500 hover:text-brand-red uppercase"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+
+                        <div className="space-y-4">
+                          {/* Category Dropdown */}
+                          <div>
+                            <label className="block text-[10px] font-black uppercase text-brand-black dark:text-zinc-300 mb-1">
+                              REVIEW CATEGORY *
+                            </label>
+                            <select
+                              value={selectedReviewCategory}
+                              onChange={(e) => setSelectedReviewCategory(e.target.value)}
+                              className="w-full bg-white dark:bg-zinc-900 border-2 border-brand-black dark:border-zinc-700 p-2 text-xs font-bold dark:text-white rounded-none focus:outline-none"
+                            >
+                              <option value="">-- Select Category --</option>
+                              <option value="Price Adjustment">Price Adjustment</option>
+                              <option value="Location Correction">Location Correction</option>
+                              <option value="Photo Update">Photo Update</option>
+                              <option value="Document Update">Document Update</option>
+                              <option value="Description Change">Description Change</option>
+                              <option value="Other">Other</option>
+                            </select>
+                          </div>
+
+                          {/* Text Area */}
+                          <div>
+                            <label className="block text-[10px] font-black uppercase text-brand-black dark:text-zinc-300 mb-1">
+                              DESCRIBE YOUR REQUEST *
+                            </label>
+                            <textarea
+                              disabled={!selectedReviewCategory}
+                              rows={4}
+                              value={reviewDescriptionText}
+                              onChange={(e) => setReviewDescriptionText(e.target.value)}
+                              placeholder="Explain what needs to be changed and why. Be specific — vague requests will be returned for clarification."
+                              className="w-full bg-white dark:bg-zinc-900 border-2 border-brand-black dark:border-zinc-700 p-2 text-xs font-bold dark:text-white rounded-none disabled:opacity-50 disabled:bg-zinc-100 dark:disabled:bg-zinc-950 focus:outline-none resize-none"
+                            />
+                            {selectedReviewCategory && (
+                              <div className="flex justify-between items-center mt-1 text-[9px] font-mono font-bold uppercase">
+                                <span className={reviewDescriptionText.length >= 80 ? "text-emerald-600 dark:text-emerald-400 font-extrabold" : "text-brand-red font-extrabold"}>
+                                  {reviewDescriptionText.length} / 80 characters minimum
+                                </span>
+                                <span className="text-zinc-400">
+                                  {reviewDescriptionText.length >= 80 ? "VALID" : "INVALID"}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Submit Button */}
+                          <button
+                            onClick={async () => {
+                              if (!selectedReviewCategory || reviewDescriptionText.length < 80) return;
+
+                              const activeRequests = req.reviewRequests || [];
+                              const newRequest = {
+                                id: 'rev-' + Date.now(),
+                                category: selectedReviewCategory as any,
+                                description: reviewDescriptionText,
+                                submittedAt: new Date().toISOString(),
+                                status: 'Pending' as const
+                              };
+
+                              try {
+                                // Update Listing with the new request
+                                await updateListingRequest?.(req.id, {
+                                  reviewRequests: [...activeRequests, newRequest]
+                                });
+
+                                // Send Confirmation Notification to Seller
+                                await sendNotification(user.id, {
+                                  type: 'message_received',
+                                  title: "Review Request Received",
+                                  body: "Your review request has been submitted. Our team will respond within 48 hours.",
+                                  data: { listingId: req.id, requestId: newRequest.id }
+                                });
+
+                                // Send Notification to Admins
+                                const adminsQuery = query(collection(db, 'users'), where('role', '==', 'Admin'));
+                                const snapshot = await getDocs(adminsQuery);
+                                const dispatchPromises: Promise<any>[] = [];
+                                snapshot.forEach(docSnap => {
+                                  dispatchPromises.push(
+                                    sendNotification(docSnap.id, {
+                                      type: 'message_received',
+                                      title: "New Property Review Request",
+                                      body: `Seller ${user.name || user.email} submitted a review request for "${req.title}".`,
+                                      data: { listingId: req.id, requestId: newRequest.id }
+                                    })
+                                  );
+                                });
+
+                                // Local guest fallback
+                                const isLocalGuest = localStorage.getItem('isLocalGuest') === 'true';
+                                if (isLocalGuest || dispatchPromises.length === 0) {
+                                  dispatchPromises.push(
+                                    sendNotification('admin-musa', {
+                                      type: 'message_received',
+                                      title: "New Property Review Request",
+                                      body: `Seller ${user.name || user.email} submitted a review request for "${req.title}".`,
+                                      data: { listingId: req.id, requestId: newRequest.id }
+                                    })
+                                  );
+                                }
+
+                                await Promise.all(dispatchPromises);
+
+                                alert("Your review request has been submitted. Our team will respond within 48 hours.");
+                                
+                                setExpandedReviewListingId(null);
+                                setSelectedReviewCategory('');
+                                setReviewDescriptionText('');
+                              } catch (err) {
+                                console.error("Failed to submit review request:", err);
+                                alert("Failed to submit review request. Please try again.");
+                              }
+                            }}
+                            disabled={!selectedReviewCategory || reviewDescriptionText.length < 80}
+                            className="w-full brutalist-button-teal py-2 text-xs font-black uppercase text-center bg-brand-teal text-brand-black hover:bg-brand-teal-light disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-brand-teal transition-all cursor-pointer"
+                          >
+                            Submit Review Request
+                          </button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Submitted Review Requests Status Cards */}
+                {req.reviewRequests && req.reviewRequests.length > 0 && (
+                  <div className="space-y-3 mt-4 pt-4 border-t-2 border-zinc-100 dark:border-zinc-800 border-dashed">
+                    <h4 className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">
+                      SUBMITTED REVIEW REQUESTS ({req.reviewRequests.length})
+                    </h4>
+                    {req.reviewRequests.map((review) => (
+                      <div
+                        key={review.id}
+                        className="border-2 border-brand-black dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 p-4 shadow-brutal-xs flex flex-col md:flex-row md:items-center justify-between gap-4"
+                      >
+                        <div className="space-y-1.5 flex-1 min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-[9px] font-black uppercase bg-zinc-200 dark:bg-zinc-800 text-brand-black dark:text-zinc-200 px-2 py-0.5 border border-brand-black/20 dark:border-zinc-700">
+                              {review.category}
+                            </span>
+                            <span className="text-[9px] font-mono text-zinc-400">
+                              {new Date(review.submittedAt).toLocaleString()}
+                            </span>
+                          </div>
+                          <p className="text-xs font-bold text-zinc-700 dark:text-zinc-300 leading-normal break-words">
+                            {review.description.length > 100
+                              ? `${review.description.substring(0, 100)}...`
+                              : review.description}
+                          </p>
+                        </div>
+
+                        <div className="flex flex-col items-start md:items-end gap-1.5 shrink-0">
+                          {review.status === 'Pending' && (
+                            <span className="text-[9px] font-black uppercase px-2.5 py-1 bg-amber-400 text-black border-2 border-brand-black italic">
+                              Pending
+                            </span>
+                          )}
+                          {review.status === 'Approved' && (
+                            <span className="text-[9px] font-black uppercase px-2.5 py-1 bg-brand-teal text-brand-black border-2 border-brand-black italic">
+                              Approved
+                            </span>
+                          )}
+                          {review.status === 'Rejected' && (
+                            <div className="space-y-1 text-left md:text-right flex flex-col items-end">
+                              <span className="text-[9px] font-black uppercase px-2.5 py-1 bg-brand-red text-white border-2 border-brand-black italic inline-block">
+                                Rejected
+                              </span>
+                              {review.adminNote && (
+                                <p className="text-[10px] font-medium text-zinc-500 dark:text-zinc-400 mt-1 max-w-xs block leading-tight">
+                                  {review.adminNote}
+                                </p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -1142,6 +1501,155 @@ export default function MyListingsView() {
                   </div>
                 )}
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Request Property Listing Change Modal */}
+      <AnimatePresence>
+        {changeRequestListingId && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => {
+                if (!changeSuccess) setChangeRequestListingId(null);
+              }}
+              className="absolute inset-0 bg-brand-black/70 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, y: 50, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 50, scale: 0.95 }}
+              className="bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 w-full max-w-lg relative z-10 p-6 shadow-brutal-lg max-h-[90vh] overflow-y-auto"
+            >
+              <button
+                onClick={() => setChangeRequestListingId(null)}
+                className="absolute top-4 right-4 text-brand-black dark:text-zinc-400 hover:text-brand-red transition-all font-bold text-xl"
+              >
+                <X size={20} />
+              </button>
+
+              {changeSuccess ? (
+                <div className="text-center py-6">
+                  <div className="w-12 h-12 bg-emerald-500 text-white border-2 border-brand-black flex items-center justify-center mx-auto mb-4">
+                    <CheckCircle2 size={24} />
+                  </div>
+                  <h3 className="font-display font-black text-xl uppercase tracking-tighter mb-2 dark:text-white">
+                    REQUEST SUBMITTED
+                  </h3>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 uppercase font-bold leading-relaxed max-w-sm mx-auto">
+                    Your request for property listing change has been submitted. Admins will review your proposed changes first.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setChangeRequestListingId(null)}
+                    className="mt-6 brutalist-button-black w-full py-3 text-xs font-black uppercase text-center cursor-pointer"
+                  >
+                    Done
+                  </button>
+                </div>
+              ) : (
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    if (!changeRequestProposedTitle.trim() || !changeRequestProposedPrice.trim()) return;
+
+                    const listingToUpdate = listingRequests.find(r => r.id === changeRequestListingId);
+                    if (!listingToUpdate) return;
+
+                    const pcr = {
+                      id: 'pcr-' + Date.now(),
+                      proposedTitle: changeRequestProposedTitle,
+                      proposedPrice: Number(parseFormattedNumber(changeRequestProposedPrice)),
+                      reason: changeRequestReason,
+                      submittedAt: new Date().toISOString(),
+                      status: 'PendingAdmin' as const
+                    };
+
+                    try {
+                      await updateListingRequest?.(changeRequestListingId, {
+                        propertyChangeRequest: pcr
+                      });
+                      setChangeSuccess(true);
+                    } catch (err) {
+                      console.error("Failed to submit property listing change request:", err);
+                    }
+                  }}
+                  className="space-y-4"
+                >
+                  <div>
+                    <h3 className="font-display font-black text-2xl uppercase tracking-tight dark:text-white">
+                      REQUEST LISTING CHANGE
+                    </h3>
+                    <p className="text-[10px] uppercase font-bold text-zinc-400">
+                      Submit proposed changes to Admin for verification review
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-[10px] font-black uppercase mb-1 dark:text-zinc-300">
+                        Proposed Property Title
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={changeRequestProposedTitle}
+                        onChange={(e) => setChangeRequestProposedTitle(e.target.value)}
+                        className="w-full bg-zinc-50 dark:bg-zinc-800 border-2 border-brand-black dark:border-zinc-700 p-2 text-xs font-bold dark:text-white"
+                        placeholder="Enter proposed listing title"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-black uppercase mb-1 dark:text-zinc-300">
+                        Proposed Valuation Price (NGN)
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={changeRequestProposedPrice}
+                        onChange={(e) => setChangeRequestProposedPrice(formatNumberString(e.target.value))}
+                        className="w-full bg-zinc-50 dark:bg-zinc-800 border-2 border-brand-black dark:border-zinc-700 p-2 text-xs font-bold dark:text-white"
+                        placeholder="Enter proposed valuation price"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-black uppercase mb-1 dark:text-zinc-300">
+                        Reason / Justification for Change
+                      </label>
+                      <textarea
+                        required
+                        rows={3}
+                        value={changeRequestReason}
+                        onChange={(e) => setChangeRequestReason(e.target.value)}
+                        className="w-full bg-zinc-50 dark:bg-zinc-800 border-2 border-brand-black dark:border-zinc-700 p-2 text-xs font-bold dark:text-white resize-none"
+                        placeholder="Describe why these changes are necessary (e.g. market updates, property alterations, owner instructions)"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setChangeRequestListingId(null)}
+                      className="flex-1 border-2 border-brand-black dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 py-2.5 text-xs font-black uppercase transition-all cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="flex-grow brutalist-button-teal py-2.5 text-xs font-black uppercase bg-brand-teal text-brand-black hover:cursor-pointer hover:bg-brand-teal-light"
+                    >
+                      Submit Request
+                    </button>
+                  </div>
+                </form>
+              )}
             </motion.div>
           </div>
         )}

@@ -93,6 +93,61 @@ const FALLBACK_PENDING_LISTINGS: any[] = [
   }
 ];
 
+const FALLBACK_CHANGE_REQUESTS: any[] = [
+  {
+    id: "mock-change-listing-1",
+    title: "Luxurious Oasis Villa, Lekki Phase 1",
+    type: "House",
+    price: 250000000,
+    location: "Lekki Phase 1, Lagos",
+    estateName: "Oasis Crest",
+    status: "Approved",
+    submittedAt: "2026-05-26T12:00:00Z",
+    listingType: "Sale",
+    ownerName: "Dr. Florence Adebayo",
+    requiresManualReview: false,
+    propertyChangeRequest: {
+      id: "pcr-mock-1",
+      proposedTitle: "Luxurious Oasis Villa with Penthouse & Pool, Lekki Phase 1",
+      proposedPrice: 280000000,
+      reason: "Owner instructed to include the brand new fully-fitted penthouse and outdoor pool facility, which has appraised the overall market value of this prime estate.",
+      submittedAt: "2026-05-31T15:30:00Z",
+      status: "PendingAdmin"
+    },
+    listingRequirements: {
+      physicalConditionDescription: "Fully dry land in a high-security gated residential street of Lekki Phase 1. Ready for immediate construction.",
+      photos: ["https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&q=80&w=600"]
+    }
+  },
+  {
+    id: "mock-change-listing-2",
+    title: "Commercial Office Complex, Victoria Island",
+    type: "Commercial",
+    price: 650000000,
+    location: "Victoria Island, Lagos",
+    estateName: "Coastal Gate Plaza",
+    status: "Approved",
+    submittedAt: "2026-05-24T09:12:00Z",
+    listingType: "Rent",
+    ownerName: "Chief Raymond Alao",
+    requiresManualReview: false,
+    propertyChangeRequest: {
+      id: "pcr-mock-2",
+      proposedTitle: "Coastal Gate Premium Waterfront Plaza, VI",
+      proposedPrice: 700000000,
+      reason: "Refitting of the waterfront deck and direct jetty access has been completed by the developer, warranting listing updates.",
+      submittedAt: "2026-05-31T10:15:00Z",
+      status: "NeedsReconfirmation",
+      physicalReconfirmationRequired: true,
+      requiresPhysicalReconfirmationBy: new Date(Date.now() + 18 * 60 * 60 * 1000).toISOString()
+    },
+    listingRequirements: {
+      physicalConditionDescription: "Waterfront commercial space built with standard specifications.",
+      photos: []
+    }
+  }
+];
+
 const FALLBACK_KYC_REQUESTS = [
   { id: 'kyc-u1', name: 'Kabiru Yusuf', phone: '+234 803 111 2222', NIN: '48201938501', kycStatus: 'Pending', submittedDocuments: ['https://example.com/utility_bill_yusuf.jpg', 'https://example.com/national_id_card_yusuf.jpg'], role: 'Seller' },
   { id: 'kyc-u2', name: 'Chioma Nze', phone: '+234 815 333 4444', NIN: '95810238475', kycStatus: 'Pending', submittedDocuments: ['https://example.com/international_passport_scan_nze.jpg'], role: 'Buyer' },
@@ -158,6 +213,11 @@ export default function AdminPanel() {
   const [rejectionReason, setRejectionReason] = useState("");
   const [requestingInfoId, setRequestingInfoId] = useState<string | null>(null);
   const [requestInfoNote, setRequestInfoNote] = useState("");
+
+  // Listing change requests sub-tab and rejection note states
+  const [listingSubTab, setListingSubTab] = useState<'pending_new' | 'change_requests'>('pending_new');
+  const [rejectingChangeId, setRejectingChangeId] = useState<string | null>(null);
+  const [changeRejectNote, setChangeRejectNote] = useState("");
 
   // KYC state inputs
   const [rejectingKycId, setRejectingKycId] = useState<string | null>(null);
@@ -308,6 +368,70 @@ export default function AdminPanel() {
     } catch (err) {
       console.error(err);
       alert("Inbox notification dispatcher crashed.");
+    }
+  };
+
+  // Property Change Request Event Handlers
+  const handleRequestPhysicalReconfirmation = async (listingId: string) => {
+    const listing = (listingRequests || []).find(r => r.id === listingId) || FALLBACK_CHANGE_REQUESTS.find(r => r.id === listingId);
+    if (!listing || !listing.propertyChangeRequest) return;
+    const updatedPcr = {
+      ...listing.propertyChangeRequest,
+      status: 'NeedsReconfirmation' as const,
+      physicalReconfirmationRequired: true,
+      requiresPhysicalReconfirmationBy: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+    };
+    try {
+      await updateListingRequest(listing.id, { propertyChangeRequest: updatedPcr });
+      alert("Physical Reconfirmation requested from the agent! The agent has 24 hours to visit the site.");
+    } catch (err) {
+      console.error("Failed requesting physical reconfirmation:", err);
+      alert("Operation failed.");
+    }
+  };
+
+  const handleApprovePropertyChange = async (listingId: string) => {
+    const listing = (listingRequests || []).find(r => r.id === listingId) || FALLBACK_CHANGE_REQUESTS.find(r => r.id === listingId);
+    if (!listing || !listing.propertyChangeRequest) return;
+    const pcr = listing.propertyChangeRequest;
+    try {
+      await updateListingRequest(listing.id, {
+        title: pcr.proposedTitle,
+        price: pcr.proposedPrice,
+        propertyChangeRequest: {
+          ...pcr,
+          status: 'Approved' as const
+        }
+      });
+      alert("Property Listing Change has been Approved! Main title and price have been updated on the marketplace.");
+    } catch (err) {
+      console.error("Failed to approve property change:", err);
+      alert("Approving change request failed.");
+    }
+  };
+
+  const handleRejectPropertyChange = async (listingId: string) => {
+    if (!changeRejectNote.trim()) {
+      alert("Please provide a rejection reason.");
+      return;
+    }
+    const listing = (listingRequests || []).find(r => r.id === listingId) || FALLBACK_CHANGE_REQUESTS.find(r => r.id === listingId);
+    if (!listing || !listing.propertyChangeRequest) return;
+    const pcr = listing.propertyChangeRequest;
+    try {
+      await updateListingRequest(listing.id, {
+        propertyChangeRequest: {
+          ...pcr,
+          status: 'Rejected' as const,
+          adminNote: changeRejectNote
+        }
+      });
+      setRejectingChangeId(null);
+      setChangeRejectNote("");
+      alert("Property Listing Change request has been Rejected.");
+    } catch (err) {
+      console.error("Failed to reject property change:", err);
+      alert("Rejecting change request failed.");
     }
   };
 
