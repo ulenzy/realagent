@@ -174,6 +174,11 @@ export default function MyListingsView() {
   const [selectedReviewCategory, setSelectedReviewCategory] = useState<string>('');
   const [reviewDescriptionText, setReviewDescriptionText] = useState<string>('');
 
+  const [feedbackNotice, setFeedbackNotice] = useState<{
+    text: string;
+    type: 'success' | 'error';
+  } | null>(null);
+
   if (!user) return null;
 
   const handleRenewListing = async (reqId: string, title: string, method: 'naira' | 'tokens') => {
@@ -311,6 +316,23 @@ export default function MyListingsView() {
 
   return (
     <div className="flex flex-col gap-6">
+      {feedbackNotice && (
+        <div className={cn(
+          "p-3 border-4 border-brand-black text-xs font-black uppercase flex justify-between items-center shadow-brutal-xs mt-2 animate-fadeIn",
+          feedbackNotice.type === "success"
+            ? "bg-emerald-100 text-emerald-800"
+            : "bg-red-105 bg-red-100 text-brand-red"
+        )}>
+          <span>{feedbackNotice.text}</span>
+          <button
+            type="button"
+            onClick={() => setFeedbackNotice(null)}
+            className="text-[10px] underline font-mono cursor-pointer hover:text-brand-black transition-colors"
+          >
+            CLOSE
+          </button>
+        </div>
+      )}
       {/* Header and Listing Request Action */}
       <div className="flex flex-col gap-4 mt-2">
         <div className="flex items-center justify-between">
@@ -802,7 +824,10 @@ export default function MyListingsView() {
                             <button
                               onClick={async () => {
                                 if (!reconfirmationReport.trim()) {
-                                  alert("Please provide the physical site visit findings text.");
+                                  setFeedbackNotice({
+                                    text: "Please provide the physical site visit findings text.",
+                                    type: "error"
+                                  });
                                   return;
                                 }
                                 try {
@@ -814,10 +839,17 @@ export default function MyListingsView() {
                                       agentReportSubmittedAt: new Date().toISOString()
                                     }
                                   });
-                                  alert("Physical site reconfirmation report submitted back to admin successfully!");
+                                  setFeedbackNotice({
+                                    text: "Physical site reconfirmation report submitted back to admin successfully!",
+                                    type: "success"
+                                  });
                                   setReconfirmationReport('');
                                 } catch (err) {
                                   console.error("Failed to submit reconfirmation report:", err);
+                                  setFeedbackNotice({
+                                    text: "Submit failed. Please check internet connections and retry.",
+                                    type: "error"
+                                  });
                                 }
                               }}
                               className="w-full brutalist-button-teal py-1.5 text-xs font-black uppercase text-center bg-brand-teal text-brand-black hover:bg-brand-teal-light transition-all cursor-pointer"
@@ -1323,14 +1355,20 @@ export default function MyListingsView() {
 
                                 await Promise.all(dispatchPromises);
 
-                                alert("Your review request has been submitted. Our team will respond within 48 hours.");
+                                setFeedbackNotice({
+                                  text: "Your review request has been submitted. Our team will respond within 48 hours.",
+                                  type: "success"
+                                });
                                 
                                 setExpandedReviewListingId(null);
                                 setSelectedReviewCategory('');
                                 setReviewDescriptionText('');
                               } catch (err) {
                                 console.error("Failed to submit review request:", err);
-                                alert("Failed to submit review request. Please try again.");
+                                setFeedbackNotice({
+                                  text: "Failed to submit review request. Please try again.",
+                                  type: "error"
+                                });
                               }
                             }}
                             disabled={!selectedReviewCategory || reviewDescriptionText.length < 80}

@@ -232,6 +232,24 @@ export default function AdminPanel() {
   const [alertCategory, setAlertCategory] = useState<'info' | 'warning' | 'promotion'>('info');
   const [targetAudience, setTargetAudience] = useState<'all' | 'Buyer' | 'Seller' | 'Agent'>('all');
 
+  const [feedbackNotice, setFeedbackNotice] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  // Local override to prevent iframe-blocking alert calls and redirect to a polished toast
+  const alert = (message: string) => {
+    const isError = message.toLowerCase().includes("failed") || 
+                    message.toLowerCase().includes("error") || 
+                    message.toLowerCase().includes("please") ||
+                    message.toLowerCase().includes("no reason");
+    setFeedbackNotice({
+      text: message,
+      type: isError ? 'error' : 'success'
+    });
+    // Auto clear feedback notice after 8s
+    setTimeout(() => {
+      setFeedbackNotice(prev => prev?.text === message ? null : prev);
+    }, 8000);
+  };
+
   // Load database streams if not simulated
   useEffect(() => {
     if (isLocalGuest || !db) return;
@@ -809,7 +827,27 @@ export default function AdminPanel() {
   };
 
   return (
-    <div className="flex flex-col min-h-screen bg-zinc-50 dark:bg-[#121214] pb-16 pt-4" id="admin-panel-container">
+    <div className="flex flex-col min-h-screen bg-zinc-50 dark:bg-[#121214] pb-16 pt-4 relative" id="admin-panel-container">
+      {feedbackNotice && (
+        <div className={cn(
+          "px-4 py-3 border-4 border-brand-black text-xs font-black uppercase flex justify-between items-center shadow-aggressive mb-6 animate-fadeIn sticky top-4 z-[9999]",
+          feedbackNotice.type === "success"
+            ? "bg-emerald-100 text-emerald-800 border-emerald-400"
+            : "bg-red-100 text-brand-red border-brand-red"
+        )}>
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 bg-brand-black shrink-0 relative flex"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-black opacity-75"></span></span>
+            <span>{feedbackNotice.text}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setFeedbackNotice(null)}
+            className="text-[10px] underline font-mono cursor-pointer hover:text-brand-black transition-colors"
+          >
+            DISMISS [X]
+          </button>
+        </div>
+      )}
       {/* Top Banner / Headline */}
       <div className="border-4 border-brand-black dark:border-zinc-700 bg-brand-teal p-6 shadow-brutal-sm mb-6 rounded-none relative overflow-hidden">
         <div className="absolute right-4 top-4 opacity-10">

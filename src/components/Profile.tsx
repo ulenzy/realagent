@@ -129,6 +129,24 @@ export default function Profile({
   ]);
   const [activeSessionsAlert, setActiveSessionsAlert] = useState<string | null>(null);
 
+  const [feedbackNotice, setFeedbackNotice] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  // Local helper to shadow native browser alert dialogue boxes inside restricted iframes
+  const alert = (message: string) => {
+    const isError = message.toLowerCase().includes("failed") || 
+                    message.toLowerCase().includes("error") || 
+                    message.toLowerCase().includes("please") ||
+                    message.toLowerCase().includes("invalid");
+    setFeedbackNotice({
+      text: message,
+      type: isError ? 'error' : 'success'
+    });
+    // Auto clear feedback notice after 7s
+    setTimeout(() => {
+      setFeedbackNotice(prev => prev?.text === message ? null : prev);
+    }, 7000);
+  };
+
   const handleUpdatePreference = (updates: Partial<typeof user.preferences>) => {
     const currentPrefs = user.preferences || DEFAULT_PREFERENCES;
     updateUser({
@@ -2982,6 +3000,23 @@ export default function Profile({
 
   return (
     <div className="p-4 flex flex-col gap-6 relative">
+      {feedbackNotice && (
+        <div className={cn(
+          "p-3 border-4 border-brand-black text-xs font-black uppercase flex justify-between items-center shadow-brutal-xs animate-fadeIn z-[999]",
+          feedbackNotice.type === "success"
+            ? "bg-emerald-100 text-emerald-800 border-emerald-400"
+            : "bg-red-100 text-brand-red border-brand-red"
+        )}>
+          <span>{feedbackNotice.text}</span>
+          <button
+            type="button"
+            onClick={() => setFeedbackNotice(null)}
+            className="text-[10px] underline font-mono cursor-pointer hover:text-brand-black transition-colors"
+          >
+            DISMISS [X]
+          </button>
+        </div>
+      )}
       {/* User Info Card */}
       <section className="bg-brand-black text-white p-6 border-4 border-brand-black relative overflow-hidden transition-colors duration-300 dark:border-zinc-700">
         <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
@@ -4017,6 +4052,7 @@ export default function Profile({
                                 </button>
                                 <button
                                   disabled={
+                                    isSubmittingKYC ||
                                     kycFiles.length < 1 ||
                                     Object.keys(uploadedKycFiles).length < 1 ||
                                     !ninNumber

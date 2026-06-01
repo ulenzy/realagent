@@ -87,6 +87,34 @@ service cloud.firestore {
              data.blocked is bool;
     }
 
+    function isValidDispute(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.listingId is string && data.listingId.size() <= 128 &&
+             data.propertyTitle is string && data.propertyTitle.size() <= 200 &&
+             data.raisedBy is string && data.raisedBy.size() <= 128 &&
+             data.status is string && data.status.size() <= 50;
+    }
+
+    function isValidInspectionRequest(data) {
+      return data.listingId is string && data.listingId.size() <= 128 &&
+             data.buyerId is string && data.buyerId.size() <= 128 &&
+             data.agentId is string && data.agentId.size() <= 128 &&
+             data.propertyId is string && data.propertyId.size() <= 128;
+    }
+
+    function isValidAnnouncement(data) {
+      return data.text is string && data.text.size() <= 2000 &&
+             data.category is string && data.category.size() <= 100 &&
+             data.audience is string && data.audience.size() <= 100;
+    }
+
+    function isValidTransaction(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.type is string && data.type.size() <= 50 &&
+             data.amount is number &&
+             data.status is string && data.status.size() <= 50;
+    }
+
     // --- User Profiles ---
     match /users/{userId} {
       allow read: if isSignedIn();
@@ -198,7 +226,7 @@ service cloud.firestore {
       allow create: if isSignedIn() &&
                     request.auth.uid == incoming().raisedBy &&
                     incoming().get('status', 'Open') == 'Open' &&
-                    isValidId(disputeId);
+                    isValidDispute(incoming());
       allow update, delete: if isAdmin();
     }
 

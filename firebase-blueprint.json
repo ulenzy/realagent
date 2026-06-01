@@ -157,6 +157,50 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["listingId", "propertyId", "buyerId", "agentId", "scheduledDate", "timeSlot", "feeStatus", "status", "createdAt"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "User transactions list for subscription or tokens",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string" },
+        "amount": { "type": "number" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "type", "amount", "status", "createdAt"]
+    },
+    "Dispute": {
+      "title": "Dispute",
+      "description": "Resolution disputes submitted by flat hunters or sellers/agents",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "listingId": { "type": "string" },
+        "propertyTitle": { "type": "string" },
+        "raisedBy": { "type": "string" },
+        "raisedByRole": { "type": "string" },
+        "againstUserId": { "type": "string" },
+        "type": { "type": "string" },
+        "description": { "type": "string" },
+        "evidence": { "type": "array" },
+        "status": { "type": "string" },
+        "raisedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "listingId", "raisedBy", "status"]
+    },
+    "Announcement": {
+      "title": "Announcement",
+      "description": "System announcements published by administrators",
+      "type": "object",
+      "properties": {
+        "text": { "type": "string" },
+        "category": { "type": "string" },
+        "audience": { "type": "string" },
+        "dispatchDate": { "type": "string", "format": "date-time" }
+      },
+      "required": ["text", "category", "audience", "dispatchDate"]
     }
   },
   "firestore": {
@@ -167,6 +211,10 @@
     "users/{userId}/notifications/{notificationId}": {
       "schema": "Notification",
       "description": "In-app read/unread notifications list for each user"
+    },
+    "users/{userId}/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "User token or subscription transactions"
     },
     "listingRequests/{requestId}": {
       "schema": "ListingRequest",
@@ -191,6 +239,14 @@
     "inspectionRequests/{requestId}": {
       "schema": "InspectionRequest",
       "description": "Property inspection booking requests"
+    },
+    "disputes/{disputeId}": {
+      "schema": "Dispute",
+      "description": "Dispute resolution requests managed by admin"
+    },
+    "announcements/{announcementId}": {
+      "schema": "Announcement",
+      "description": "System announcements broadcasted to users"
     }
   }
 }

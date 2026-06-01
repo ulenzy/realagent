@@ -25,6 +25,7 @@ export const DisputeFlow: React.FC<DisputeFlowProps> = ({ property, onClose }) =
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successCaseId, setSuccessCaseId] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragRef = useRef<HTMLDivElement>(null);
@@ -89,7 +90,7 @@ export const DisputeFlow: React.FC<DisputeFlowProps> = ({ property, onClose }) =
     if (e.dataTransfer.files) {
       const addedFiles = Array.from(e.dataTransfer.files);
       if (files.length + addedFiles.length > 5) {
-        alert("Maximum 5 evidence files allowed.");
+        setErrorMessage("Maximum 5 evidence files allowed.");
         return;
       }
       setFiles(prev => [...prev, ...addedFiles].slice(0, 5));
@@ -100,7 +101,7 @@ export const DisputeFlow: React.FC<DisputeFlowProps> = ({ property, onClose }) =
     if (e.target.files) {
       const addedFiles = Array.from(e.target.files);
       if (files.length + addedFiles.length > 5) {
-        alert("Maximum 5 evidence files allowed.");
+        setErrorMessage("Maximum 5 evidence files allowed.");
         return;
       }
       setFiles(prev => [...prev, ...addedFiles].slice(0, 5));
@@ -256,7 +257,7 @@ export const DisputeFlow: React.FC<DisputeFlowProps> = ({ property, onClose }) =
       setSuccessCaseId(disputeId);
     } catch (err: any) {
       console.error("Dispute Submission failed:", err);
-      alert(`Submission failed: ${err.message || err}`);
+      setErrorMessage(`Submission failed: ${err.message || err}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -338,6 +339,14 @@ export const DisputeFlow: React.FC<DisputeFlowProps> = ({ property, onClose }) =
 
             {/* Step Body */}
             <div className="p-6 min-h-[300px]">
+              {errorMessage && (
+                <div className="mb-4 p-3 bg-red-100 border-2 border-brand-black text-brand-red text-xs font-black uppercase flex justify-between items-center animate-fadeIn">
+                  <span>{errorMessage}</span>
+                  <button type="button" onClick={() => setErrorMessage(null)} className="text-[10px] underline font-mono cursor-pointer hover:text-brand-black transition-colors">
+                    CLOSE
+                  </button>
+                </div>
+              )}
               <AnimatePresence mode="wait">
                 {step === 1 && (
                   <motion.div
