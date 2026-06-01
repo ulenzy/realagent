@@ -46,6 +46,24 @@ export function LeafletMap({
   });
   
   const mapRef = useRef<L.Map | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
+
+  const getFetchSignal = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    return controller.signal;
+  };
 
   useEffect(() => {
     const lat = mapCenter[0];
@@ -53,10 +71,12 @@ export function LeafletMap({
     
     const fetchInitial = async () => {
       setIsResolving(true);
+      const signal = getFetchSignal();
       try {
         const response = await fetch(
           `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`,
           {
+            signal,
             headers: {
               'Accept-Language': 'en',
               'User-Agent': 'RealAgentsApp/1.0'
@@ -69,10 +89,13 @@ export function LeafletMap({
         } else {
           setResolvedAddress(`${lat.toFixed(5)}, ${lng.toFixed(5)}`);
         }
-      } catch (err) {
+      } catch (err: any) {
+        if (err.name === 'AbortError') return;
         setResolvedAddress(`${lat.toFixed(5)}, ${lng.toFixed(5)}`);
       } finally {
-        setIsResolving(false);
+        if (abortControllerRef.current?.signal === signal) {
+          setIsResolving(false);
+        }
       }
     };
     fetchInitial();
@@ -88,10 +111,12 @@ export function LeafletMap({
     setIsMoving(false);
     setIsResolving(true);
     setConfirmedPin(null);
+    const signal = getFetchSignal();
     try {
       const response = await fetch(
         `https://nominatim.openstreetmap.org/reverse?format=json&lat=${center.lat}&lon=${center.lng}`,
         {
+          signal,
           headers: {
             'Accept-Language': 'en',
             'User-Agent': 'RealAgentsApp/1.0'
@@ -101,11 +126,14 @@ export function LeafletMap({
       if (!response.ok) throw new Error('Failed to fetch address');
       const data = await response.json();
       setResolvedAddress(data.display_name || `${center.lat.toFixed(5)}, ${center.lng.toFixed(5)}`);
-    } catch (err) {
+    } catch (err: any) {
+      if (err.name === 'AbortError') return;
       console.error("Geocoding failed:", err);
       setResolvedAddress(`${center.lat.toFixed(5)}, ${center.lng.toFixed(5)}`);
     } finally {
-      setIsResolving(false);
+      if (abortControllerRef.current?.signal === signal) {
+        setIsResolving(false);
+      }
     }
   };
 

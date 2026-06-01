@@ -58,7 +58,7 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigation } from '../context/NavigationContext';
 
 export default function Marketplace() {
-  const { user, savedProperties, toggleSavedProperty: onToggleSave, isLocalGuest } = useAuth();
+  const { user, savedProperties, toggleSavedProperty: onToggleSave } = useAuth();
   const { handleSelectProperty: onSelectProperty, setSelectedAgentId: onViewAgentProfile } = useNavigation();
 
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
@@ -90,22 +90,6 @@ export default function Marketplace() {
   }, [user, hasInitializedPrefs]);
 
   useEffect(() => {
-    if (isLocalGuest) {
-      const loadLocalProps = () => {
-        const saved = localStorage.getItem('localGuestProperties');
-        if (saved) {
-          const nowStr = new Date().toISOString();
-          const parsed = JSON.parse(saved);
-          setLiveProperties(parsed.filter((p: any) => p.expiresAt > nowStr && p.status !== 'Inactive'));
-        } else {
-          setLiveProperties([]);
-        }
-      };
-      loadLocalProps();
-      window.addEventListener('local_guest_properties_updated', loadLocalProps);
-      return () => window.removeEventListener('local_guest_properties_updated', loadLocalProps);
-    }
-
     const q = collection(db, 'properties');
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -119,7 +103,7 @@ export default function Marketplace() {
     });
 
     return () => unsubscribe();
-  }, [isLocalGuest]);
+  }, []);
 
   const availableStates = useMemo(() => {
     return ['any', ...new Set(liveProperties.map(p => p.location.state))];

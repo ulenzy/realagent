@@ -128,7 +128,7 @@ export interface TokenPurchase {
   reference: string;
 }
 
-export type ListingFeeStatus = 'Verification Unpaid' | 'Verification Paid' | 'Monthly Unpaid' | 'Monthly Paid' | 'Inactive' | 'Unpaid' | 'Paid' | 'Waived';
+export type ListingFeeStatus = 'Verification Unpaid' | 'Verification Paid' | 'Monthly Unpaid' | 'Monthly Paid' | 'Inactive' | 'Waived';
 
 export type ListingStatus = 'Draft' | 'Pending' | 'Agent Bidding' | 'Inspection Scheduled' | 'Under Review' | 'Approved' | 'Rejected' | 'Archived' | 'Inactive';
 

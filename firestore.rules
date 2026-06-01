@@ -51,9 +51,8 @@ service cloud.firestore {
 
     // --- Listing Requests (Pipeline) ---
     match /listingRequests/{requestId} {
-      allow read: if isAdmin() || (isSignedIn() && (
-        existing().get('ownerId', '') == request.auth.uid ||
-        (isAgent() && existing().status == 'Agent Bidding')
+      allow read: if isAgent() || isAdmin() || (isSignedIn() && (
+        existing().get('ownerId', '') == request.auth.uid
       ));
 
       allow create: if isAdmin() || (isSignedIn() && request.auth.uid == incoming().ownerId);
@@ -81,7 +80,9 @@ service cloud.firestore {
     // --- Marketplace Properties ---
     match /properties/{propertyId} {
       allow read: if true;
-      allow write: if isSignedIn();
+      // Properties are written only by Cloud Functions via Admin SDK on listing approval.
+      // For now, temporarily allow admin writes as a transition state until the Cloud Function is built:
+      allow write: if isAdmin();
     }
 
     // --- Transactions Subcollection ---

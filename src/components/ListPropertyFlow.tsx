@@ -20,6 +20,7 @@ export default function ListPropertyFlow() {
   const [draftSaved, setDraftSaved] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [submittedRequestTitle, setSubmittedRequestTitle] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Check if seller has an active monthly listing
   const nowISO = new Date().toISOString();
@@ -337,6 +338,7 @@ export default function ListPropertyFlow() {
   }
 
   const handleListingSubmit = async (formData: any) => {
+    setIsSubmitting(true);
     try {
       const now = new Date().toISOString();
       const expires = new Date(Date.now() + 30 * 86400000).toISOString();
@@ -419,7 +421,7 @@ export default function ListPropertyFlow() {
           estateName: formData.landDetails?.isEstatePlot ? (formData.landDetails?.estateName || '') : '',
           amenities: formData.landDetails?.infrastructure || [],
           googlePinLink: formData.googlePinLink || formData.landDetails?.locationPin || '',
-          listingFeeStatus: pendingPayment?.listingFeeStatus || 'Unpaid',
+          listingFeeStatus: pendingPayment?.listingFeeStatus || 'Monthly Unpaid',
           listingFeePaidAt: pendingPayment?.monthlyFeePaidAt || '',
           verificationFeePaid: user.verifiedPropertySeller || false,
           verificationFeePaidAt: user.verificationFeePaidAt || '',
@@ -462,7 +464,7 @@ export default function ListPropertyFlow() {
           estateName: formData.estateName,
           amenities: formData.amenities,
           googlePinLink: formData.googlePinLink,
-          listingFeeStatus: pendingPayment?.listingFeeStatus || 'Unpaid',
+          listingFeeStatus: pendingPayment?.listingFeeStatus || 'Monthly Unpaid',
           listingFeePaidAt: pendingPayment?.monthlyFeePaidAt || '',
           verificationFeePaid: user.verifiedPropertySeller || false,
           verificationFeePaidAt: user.verificationFeePaidAt || '',
@@ -497,6 +499,8 @@ export default function ListPropertyFlow() {
       setSubmitted(true);
     } catch (err) {
       console.error("Failed to submit property listing:", err);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 

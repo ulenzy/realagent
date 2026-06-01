@@ -11,6 +11,7 @@ interface NotificationDrawerProps {
   onMarkAsRead: (id: string) => void;
   onMarkAllAsRead: () => void;
   onNavigateToProperty?: (listingId: string) => void;
+  onLoadMore?: () => void;
 }
 
 export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
@@ -20,6 +21,7 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
   onMarkAsRead,
   onMarkAllAsRead,
   onNavigateToProperty,
+  onLoadMore,
 }) => {
   if (!isOpen) return null;
 
@@ -216,6 +218,18 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
                 </div>
               );
             })
+          )}
+
+          {notifications.length > 0 && notifications.length % 50 === 0 && (
+            <div className="pt-2 pb-1 text-center font-mono">
+              <button
+                type="button"
+                onClick={onLoadMore}
+                className="text-[10px] font-black uppercase tracking-wider text-brand-teal dark:text-teal-400 hover:underline cursor-pointer py-1.5 focus:outline-none"
+              >
+                Load earlier notifications
+              </button>
+            </div>
           )}
         </div>
       </motion.div>

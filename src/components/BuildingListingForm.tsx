@@ -62,6 +62,7 @@ export default function BuildingListingForm({
   const [importedDraftId, setImportedDraftId] = useState<string | null>(null);
   const [customAmenity, setCustomAmenity] = useState('');
   const [showPublishModal, setShowPublishModal] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const preventSaveRef = useRef(true);
 
   const localDraft = useMemo(() => {
@@ -743,37 +744,69 @@ export default function BuildingListingForm({
                 {/* Button A — PUBLISH AS LIVE */}
                 <button
                   type="button"
-                  onClick={() => {
-                    setShowPublishModal(false);
-                    localStorage.removeItem('realagents_building_draft');
-                    if (onSubmit) onSubmit({ ...formData, propertyCategory: 'Building', isDraft: false });
+                  disabled={isSubmitting}
+                  onClick={async () => {
+                    setIsSubmitting(true);
+                    try {
+                      localStorage.removeItem('realagents_building_draft');
+                      if (onSubmit) {
+                        await onSubmit({ ...formData, propertyCategory: 'Building', isDraft: false });
+                      }
+                      setShowPublishModal(false);
+                    } catch (err) {
+                      console.error("Publish listing error:", err);
+                    } finally {
+                      setIsSubmitting(false);
+                    }
                   }}
-                  className="flex items-center gap-4 p-4 border-4 border-brand-black dark:border-zinc-700 bg-brand-teal hover:bg-brand-teal/90 text-brand-black transition-transform hover:-translate-y-1 hover:shadow-brutal-xs font-display font-black italic uppercase text-left w-full"
+                  className="flex items-center gap-4 p-4 border-4 border-brand-black dark:border-zinc-700 bg-brand-teal hover:bg-brand-teal/90 text-brand-black transition-transform hover:-translate-y-1 hover:shadow-brutal-xs font-display font-black italic uppercase text-left w-full disabled:opacity-50 disabled:pointer-events-none disabled:-translate-y-0 disabled:shadow-none"
                 >
                   <div className="p-2 bg-brand-black text-white shrink-0">
-                    <CheckCircle2 size={24} />
+                    {isSubmitting ? (
+                      <div className="w-6 h-6 border-2 border-brand-teal border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <CheckCircle2 size={24} />
+                    )}
                   </div>
                   <div className="flex-1">
-                    <div className="text-lg tracking-tight">PUBLISH AS LIVE</div>
-                    <div className="text-[10px] font-mono font-normal normal-case text-zinc-800 leading-tight">Make listing instantly viewable to agents and start bidding now.</div>
+                    <div className="text-lg tracking-tight">
+                      {isSubmitting ? 'SAVING...' : 'PUBLISH AS LIVE'}
+                    </div>
+                    <div className="text-[10px] font-mono font-normal normal-case text-zinc-805 dark:text-zinc-900 leading-tight">Make listing instantly viewable to agents and start bidding now.</div>
                   </div>
                 </button>
 
                 {/* Button B — SAVE TO DRAFTS FOR LATER */}
                 <button
                   type="button"
-                  onClick={() => {
-                    setShowPublishModal(false);
-                    localStorage.removeItem('realagents_building_draft');
-                    if (onSubmit) onSubmit({ ...formData, propertyCategory: 'Building', isDraft: true });
+                  disabled={isSubmitting}
+                  onClick={async () => {
+                    setIsSubmitting(true);
+                    try {
+                      localStorage.removeItem('realagents_building_draft');
+                      if (onSubmit) {
+                        await onSubmit({ ...formData, propertyCategory: 'Building', isDraft: true });
+                      }
+                      setShowPublishModal(false);
+                    } catch (err) {
+                      console.error("Save draft error:", err);
+                    } finally {
+                      setIsSubmitting(false);
+                    }
                   }}
-                  className="flex items-center gap-4 p-4 border-4 border-brand-black dark:border-zinc-700 bg-white dark:bg-zinc-805 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-brand-black dark:text-white transition-transform hover:-translate-y-1 hover:shadow-brutal-xs font-display font-black italic uppercase text-left w-full"
+                  className="flex items-center gap-4 p-4 border-4 border-brand-black dark:border-zinc-700 bg-white dark:bg-zinc-805 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-brand-black dark:text-white transition-transform hover:-translate-y-1 hover:shadow-brutal-xs font-display font-black italic uppercase text-left w-full disabled:opacity-50 disabled:pointer-events-none disabled:-translate-y-0 disabled:shadow-none"
                 >
                   <div className="p-2 bg-zinc-200 dark:bg-zinc-700 text-brand-black dark:text-white shrink-0">
-                    <Banknote size={24} />
+                    {isSubmitting ? (
+                      <div className="w-6 h-6 border-2 border-brand-teal border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <Banknote size={24} />
+                    )}
                   </div>
                   <div className="flex-1">
-                    <div className="text-lg tracking-tight">SAVE TO DRAFTS FOR LATER</div>
+                    <div className="text-lg tracking-tight">
+                      {isSubmitting ? 'SAVING...' : 'SAVE TO DRAFTS FOR LATER'}
+                    </div>
                     <div className="text-[10px] font-mono font-normal normal-case text-zinc-500 dark:text-zinc-400 leading-tight">Keep it safely tucked away in your workspace drafts. (Max 3 drafts)</div>
                   </div>
                 </button>

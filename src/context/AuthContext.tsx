@@ -12,7 +12,7 @@ import {
   updateProfile
 } from 'firebase/auth';
 import { auth, googleProvider, facebookProvider } from '../lib/firebase';
-import { doc, getDoc, getDocs, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove, collection, query, where, addDoc, deleteDoc, Timestamp } from 'firebase/firestore';
+import { doc, getDoc, getDocs, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove, collection, query, where, addDoc, deleteDoc, Timestamp, runTransaction, increment, orderBy, limit, startAfter } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { sendNotification } from '../lib/notifications';
 import { User, ListingRequest, ListingStatus, Transaction, Property, ListingType, AgentTier, ROILevel, AreaTrend } from '../types';
@@ -27,7 +27,6 @@ interface AuthContextType {
   listingRequests: ListingRequest[];
   platformListings: ListingRequest[];
   savedProperties: string[];
-  isLocalGuest: boolean;
   signInWithGoogle: () => Promise<void>;
   signInWithFacebook: () => Promise<void>;
   signInWithEmail: (email: string, pass: string) => Promise<void>;
@@ -46,6 +45,8 @@ interface AuthContextType {
   updateDraft: (draftId: string, data: Partial<ListingRequest>) => Promise<void>;
   deleteDraft: (draftId: string) => Promise<void>;
   promoteDraftToListing: (draftId: string) => Promise<void>;
+  loadMorePlatformListings: () => Promise<void>;
+  loadMoreListingRequests: () => Promise<void>;
 }
 
 export const DEFAULT_PREFERENCES = {
@@ -71,8 +72,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [listingRequests, setListingRequests] = useState<ListingRequest[]>([]);
-  const [platformListings, setPlatformListings] = useState<ListingRequest[]>([]);
+  const [liveListingRequests, setLiveListingRequests] = useState<ListingRequest[]>([]);
+  const [loadedMoreListingRequests, setLoadedMoreListingRequests] = useState<ListingRequest[]>([]);
+  const [livePlatformListings, setLivePlatformListings] = useState<ListingRequest[]>([]);
+  const [loadedMorePlatformListings, setLoadedMorePlatformListings] = useState<ListingRequest[]>([]);
+
+  const [platformListingsLastDoc, setPlatformListingsLastDoc] = useState<any>(null);
+  const [listingRequestsLastDoc, setListingRequestsLastDoc] = useState<any>(null);
+
+  const platformListings = React.useMemo(() => {
+    const seenIds = new Set(livePlatformListings.map(p => p.id));
+    const filteredLoaded = loadedMorePlatformListings.filter(p => !seenIds.has(p.id));
+    return [...livePlatformListings, ...filteredLoaded];
+  }, [livePlatformListings, loadedMorePlatformListings]);
+
+  const listingRequests = React.useMemo(() => {
+    const seenIds = new Set(liveListingRequests.map(r => r.id));
+    const filteredLoaded = loadedMoreListingRequests.filter(r => !seenIds.has(r.id));
+    return [...liveListingRequests, ...filteredLoaded];
+  }, [liveListingRequests, loadedMoreListingRequests]);
+
   const [savedProperties, setSavedProperties] = useState<string[]>([]);
   const [drafts, setDrafts] = useState<ListingRequest[]>([]);
   const unsubscribeUserRef = React.useRef<(() => void) | null>(null);
@@ -90,26 +109,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         unsubscribeUserRef.current = onSnapshot(userDocRef, (docSnap) => {
           if (docSnap.exists()) {
             const userData = docSnap.data() as User;
-            const updatedUserData = { ...userData };
-            let needsDbUpdate = false;
-
-            const isTargetAdmin = 
-              userData.email === 'uojemeni15@gmail.com' || 
-              (userData.name && userData.name.toUpperCase().includes('LENZY'));
-
-            if (isTargetAdmin && userData.role !== 'Admin') {
-              updatedUserData.role = 'Admin';
-              needsDbUpdate = true;
-            }
-
-            setUser(updatedUserData);
-            setSavedProperties(updatedUserData.savedProperties || []);
-
-            if (needsDbUpdate) {
-              updateDoc(userDocRef, { role: 'Admin' }).catch(err => 
-                console.error("Auto-assign Admin role error on Firestore:", err)
-              );
-            }
+            setUser(userData);
+            setSavedProperties(userData.savedProperties || []);
 
             if (userData.accountStatus === 'Suspended' || userData.accountStatus === 'Banned') {
               setTimeout(() => {
@@ -139,11 +140,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
             let listingsQuery;
             if (userData.role === 'Agent' || userData.role === 'Admin') {
-              // Agents and Admins can view all listing requests in the platform
-              listingsQuery = collection(db, 'listingRequests');
+              // Paginated query for Agents/Admin
+              listingsQuery = query(
+                collection(db, 'listingRequests'),
+                orderBy('submittedAt', 'desc'),
+                limit(15)
+              );
             } else {
               // Sellers/Buyers view their own listing requests
-              listingsQuery = query(collection(db, 'listingRequests'), where('ownerId', '==', fUser.uid));
+              listingsQuery = query(
+                collection(db, 'listingRequests'),
+                where('ownerId', '==', fUser.uid),
+                orderBy('submittedAt', 'desc')
+              );
             }
 
             unsubscribeListingsRef.current = onSnapshot(listingsQuery, (snapshot) => {
@@ -151,28 +160,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 id: doc.id,
                 ...doc.data()
               } as any));
-              setListingRequests(listings);
-
-              // Client-side expiry check for monthly fee expiration
-              const nowISO = new Date().toISOString();
-              listings.forEach(async (listing) => {
-                if (listing.status === 'Approved' && listing.monthlyFeeExpiresAt && listing.monthlyFeeExpiresAt < nowISO) {
-                  // update listing request status to Inactive and Monthly Unpaid
-                  await updateListingRequest(listing.id, { status: 'Inactive', listingFeeStatus: 'Monthly Unpaid' });
-                  
-                  // update the promoted property document linked to this listingRequestId
-                  try {
-                    const qProps = query(collection(db, 'properties'), where('listingRequestId', '==', listing.id));
-                    const querySnapshot = await getDocs(qProps);
-                    const promises = querySnapshot.docs.map(docSnap => 
-                      updateDoc(doc(db, 'properties', docSnap.id), { status: 'Inactive' })
-                    );
-                    await Promise.all(promises);
-                  } catch (err) {
-                    console.error("Failed to mark property status as Inactive on Firestore:", err);
-                  }
+              setLiveListingRequests(listings);
+              if (userData.role === 'Agent' || userData.role === 'Admin') {
+                if (snapshot.docs.length > 0) {
+                  setListingRequestsLastDoc(snapshot.docs[snapshot.docs.length - 1]);
+                } else {
+                  setListingRequestsLastDoc(null);
                 }
-              });
+              }
             }, (err) => {
               console.error("Listings dynamic snapshot error:", err);
             });
@@ -182,25 +177,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               unsubscribePlatformListingsRef.current();
             }
 
-            const platformQuery = query(collection(db, 'listingRequests'), where('status', '==', 'Agent Bidding'));
+            const platformQuery = query(
+              collection(db, 'listingRequests'),
+              where('status', '==', 'Agent Bidding'),
+              orderBy('submittedAt', 'desc'),
+              limit(15)
+            );
             unsubscribePlatformListingsRef.current = onSnapshot(platformQuery, (snapshot) => {
               const pListings = snapshot.docs.map(doc => ({
                 id: doc.id,
                 ...doc.data()
               } as any));
-              setPlatformListings(pListings);
+              setLivePlatformListings(pListings);
+              if (snapshot.docs.length > 0) {
+                setPlatformListingsLastDoc(snapshot.docs[snapshot.docs.length - 1]);
+              } else {
+                setPlatformListingsLastDoc(null);
+              }
             }, (err) => {
               console.error("Platform listings snapshot error:", err);
             });
           } else {
             // Initial profile creation
-            sessionStorage.setItem('isSignUpFlow', 'true');
             const nameParts = (fUser.displayName || '').trim().split(/\s+/);
             const firstName = nameParts[0] || '';
             const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
-            const isTargetAdmin = 
-              (fUser.email || '').toLowerCase() === 'uojemeni15@gmail.com' || 
-              (fUser.displayName || '').toUpperCase().includes('LENZY');
             const newUser: User = {
               id: fUser.uid,
               name: fUser.displayName || '',
@@ -215,7 +216,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               profileScore: 0,
               tokens: 100, // Initial tokens
               savedProperties: [],
-              role: isTargetAdmin ? 'Admin' : 'Buyer',
+              role: 'Buyer',
               onboardingCompleted: false,
               phoneVerified: false,
               preferences: DEFAULT_PREFERENCES,
@@ -235,8 +236,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (unsubscribePlatformListingsRef.current) unsubscribePlatformListingsRef.current();
         if (unsubscribeDraftsRef.current) unsubscribeDraftsRef.current();
         setUser(null);
-        setListingRequests([]);
-        setPlatformListings([]);
+        setLiveListingRequests([]);
+        setLoadedMoreListingRequests([]);
+        setLivePlatformListings([]);
+        setLoadedMorePlatformListings([]);
+        setPlatformListingsLastDoc(null);
+        setListingRequestsLastDoc(null);
         setSavedProperties([]);
         setDrafts([]);
         setLoading(false);
@@ -275,7 +280,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signInWithGoogleMock = async () => {
     try {
-      sessionStorage.setItem('isSignUpFlow', 'true');
       const userCredential = await signInAnonymously(auth);
       const fUser = userCredential.user;
       const userDocRef = doc(db, 'users', fUser.uid);
@@ -329,7 +333,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signInWithFacebookMock = async () => {
     try {
-      sessionStorage.setItem('isSignUpFlow', 'true');
       const userCredential = await signInAnonymously(auth);
       const fUser = userCredential.user;
       const userDocRef = doc(db, 'users', fUser.uid);
@@ -371,7 +374,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signUpWithEmail = async (email: string, pass: string, name: string) => {
     try {
-      sessionStorage.setItem('isSignUpFlow', 'true');
       const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
       const fUser = userCredential.user;
       await updateProfile(fUser, { displayName: name });
@@ -578,6 +580,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     try {
+      // TODO: Move to Cloud Function — client-side write to properties will fail in production with locked rules.
       const newDocRef = doc(collection(db, 'properties'));
       await setDoc(newDocRef, newPropertyData);
     } catch (error) {
@@ -587,23 +590,41 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const saveDraft = async (draftData: Partial<ListingRequest>): Promise<string> => {
     if (!user) throw new Error("User must be logged in to save drafts.");
-    if ((user.draftCount || 0) >= 3) {
-      throw new Error("Draft limit reached — you have 3 saved drafts. Submit or delete one before saving a new draft.");
-    }
+    const userDocRef = doc(db, 'users', user.id);
+    const newDraftDocRef = doc(collection(db, 'drafts'));
+    const draftId = newDraftDocRef.id;
+
     try {
-      const docRef = doc(collection(db, 'drafts'));
-      const draftId = docRef.id;
-      const now = new Date().toISOString();
-      await setDoc(docRef, {
-        ...draftData,
-        id: draftId,
-        ownerId: user.id,
-        isDraft: true,
-        draftSavedAt: now,
-        status: 'Draft' as ListingStatus
+      await runTransaction(db, async (transaction) => {
+        // Read the user document inside transaction
+        const userSnap = await transaction.get(userDocRef);
+        
+        // Count actual draft documents using getDocs inside the transaction
+        const draftQuery = query(collection(db, 'drafts'), where('ownerId', '==', user.id));
+        const draftSnap = await getDocs(draftQuery);
+        
+        if (draftSnap.size >= 3) {
+          throw new Error("Draft limit reached — you have 3 saved drafts. Submit or delete one before saving a new draft.");
+        }
+
+        const now = new Date().toISOString();
+        const draftDocData = {
+          ...draftData,
+          id: draftId,
+          ownerId: user.id,
+          isDraft: true,
+          draftSavedAt: now,
+          status: 'Draft' as ListingStatus
+        };
+
+        // Write the new draft document in the transaction
+        transaction.set(newDraftDocRef, draftDocData);
+
+        // Increment draftCount atomically on the user document
+        const currentCount = userSnap.exists() ? (userSnap.data().draftCount || 0) : 0;
+        transaction.update(userDocRef, { draftCount: currentCount + 1 });
       });
-      const newCount = (user.draftCount || 0) + 1;
-      await updateUser({ draftCount: newCount });
+
       return draftId;
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'drafts');
@@ -707,7 +728,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const updateUser = async (updates: Partial<User>) => {
     if (!user) return;
     try {
-      await updateDoc(doc(db, 'users', user.id), updates);
+      const dbUpdates = { ...updates } as any;
+      if (dbUpdates.tokens !== undefined && typeof dbUpdates.tokens === 'number') {
+        const delta = dbUpdates.tokens - (user.tokens || 0);
+        dbUpdates.tokens = increment(delta);
+      }
+      await updateDoc(doc(db, 'users', user.id), dbUpdates);
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${user.id}`);
     }
@@ -718,7 +744,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const userRef = doc(db, 'users', user.id);
       await updateDoc(userRef, {
-        tokens: user.tokens + (transaction.type === 'Credit' ? transaction.amount : -transaction.amount)
+        tokens: increment(transaction.type === 'Credit' ? transaction.amount : -transaction.amount)
       });
       await addDoc(collection(db, `users/${user.id}/transactions`), transaction);
     } catch (error) {
@@ -757,12 +783,61 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const loadMorePlatformListings = async (): Promise<void> => {
+    if (!platformListingsLastDoc) return;
+    try {
+      const q = query(
+        collection(db, 'listingRequests'),
+        where('status', '==', 'Agent Bidding'),
+        orderBy('submittedAt', 'desc'),
+        startAfter(platformListingsLastDoc),
+        limit(15)
+      );
+      const snapshot = await getDocs(q);
+      const pListings = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      } as any));
+      if (pListings.length > 0) {
+        setLoadedMorePlatformListings(prev => [...prev, ...pListings]);
+        setPlatformListingsLastDoc(snapshot.docs[snapshot.docs.length - 1]);
+      }
+    } catch (err) {
+      console.error("Load more platform listings error:", err);
+    }
+  };
+
+  const loadMoreListingRequests = async (): Promise<void> => {
+    if (!user || !listingRequestsLastDoc) return;
+    if (user.role !== 'Agent' && user.role !== 'Admin') return;
+    try {
+      const q = query(
+        collection(db, 'listingRequests'),
+        orderBy('submittedAt', 'desc'),
+        startAfter(listingRequestsLastDoc),
+        limit(15)
+      );
+      const snapshot = await getDocs(q);
+      const listings = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      } as any));
+      if (listings.length > 0) {
+        setLoadedMoreListingRequests(prev => [...prev, ...listings]);
+        setListingRequestsLastDoc(snapshot.docs[snapshot.docs.length - 1]);
+      }
+    } catch (err) {
+      console.error("Load more listing requests error:", err);
+    }
+  };
+
   return (
     <AuthContext.Provider value={{ 
-      user, firebaseUser, loading, error, listingRequests, platformListings, savedProperties, isLocalGuest: false,
+      user, firebaseUser, loading, error, listingRequests, platformListings, savedProperties,
       signInWithGoogle, signInWithFacebook, signInWithEmail, signUpWithEmail, signInWithGoogleMock, signInWithFacebookMock, logout,
       toggleSavedProperty, addListingRequest, updateListingRequest, updateUser, addTransaction, updateAgentTrustScore,
-      drafts, saveDraft, updateDraft, deleteDraft, promoteDraftToListing
+      drafts, saveDraft, updateDraft, deleteDraft, promoteDraftToListing,
+      loadMorePlatformListings, loadMoreListingRequests
     }}>
       {children}
     </AuthContext.Provider>

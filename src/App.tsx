@@ -14,7 +14,7 @@ import { Home, Search, FileText, Zap, MessageCircle, Moon, Sun, Gavel, Heart, St
 import { cn } from './lib/utils';
 import { mockProperties } from './data/mockListings';
 import { ListingRequest, Property } from './types';
-import { doc, onSnapshot, collection, query, updateDoc } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, updateDoc, orderBy, limit, startAfter, getDocs } from 'firebase/firestore';
 import { NotificationDrawer } from './components/NotificationDrawer';
 import { db } from './lib/firebase';
 import Marketplace from './components/Marketplace';
@@ -64,43 +64,31 @@ export default function App() {
   const toastActionDone = React.useRef(false);
 
   // Notifications
-  const [notifications, setNotifications] = React.useState<any[]>([]);
+  const [liveNotifications, setLiveNotifications] = React.useState<any[]>([]);
+  const [loadedMoreNotifications, setLoadedMoreNotifications] = React.useState<any[]>([]);
+  const [notificationsLastDoc, setNotificationsLastDoc] = React.useState<any>(null);
   const [isNotificationOpen, setIsNotificationOpen] = React.useState(false);
+
+  const notifications = React.useMemo(() => {
+    const seenIds = new Set(liveNotifications.map(n => n.id));
+    const filteredLoaded = loadedMoreNotifications.filter(n => !seenIds.has(n.id));
+    return [...liveNotifications, ...filteredLoaded];
+  }, [liveNotifications, loadedMoreNotifications]);
 
   React.useEffect(() => {
     if (!user) {
-      setNotifications([]);
+      setLiveNotifications([]);
+      setLoadedMoreNotifications([]);
+      setNotificationsLastDoc(null);
       return;
     }
 
-    const isLocalGuest = localStorage.getItem('isLocalGuest') === 'true';
-
-    if (isLocalGuest) {
-      const handleLocalUpdate = () => {
-        const stored = localStorage.getItem(`notifications_${user.id}`);
-        if (stored) {
-          try {
-            setNotifications(JSON.parse(stored));
-          } catch (e) {
-            setNotifications([]);
-          }
-        } else {
-          setNotifications([]);
-        }
-      };
-      
-      handleLocalUpdate();
-      
-      window.addEventListener('storage', handleLocalUpdate);
-      const interval = setInterval(handleLocalUpdate, 1500);
-      return () => {
-        window.removeEventListener('storage', handleLocalUpdate);
-        clearInterval(interval);
-      };
-    }
-
     // Live Snapshot from Firestore
-    const q = collection(db, 'users', user.id, 'notifications');
+    const q = query(
+      collection(db, 'users', user.id, 'notifications'),
+      orderBy('createdAt', 'desc'),
+      limit(50)
+    );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const list: any[] = [];
       snapshot.forEach((doc) => {
@@ -115,8 +103,12 @@ export default function App() {
           createdAt: data.createdAt || ''
         });
       });
-      list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      setNotifications(list);
+      setLiveNotifications(list);
+      if (snapshot.docs.length > 0) {
+        setNotificationsLastDoc(snapshot.docs[snapshot.docs.length - 1]);
+      } else {
+        setNotificationsLastDoc(null);
+      }
     }, (error) => {
       console.error("Notifications listener error:", error);
     });
@@ -124,41 +116,55 @@ export default function App() {
     return () => unsubscribe();
   }, [user]);
 
+  const loadMoreNotifications = async () => {
+    if (!user || !notificationsLastDoc) return;
+    try {
+      const q = query(
+        collection(db, 'users', user.id, 'notifications'),
+        orderBy('createdAt', 'desc'),
+        startAfter(notificationsLastDoc),
+        limit(50)
+      );
+      const snapshot = await getDocs(q);
+      const list: any[] = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        list.push({
+          id: doc.id,
+          title: data.title || '',
+          body: data.body || '',
+          type: data.type || '',
+          data: data.data || {},
+          read: !!data.read,
+          createdAt: data.createdAt || ''
+        });
+      });
+      if (list.length > 0) {
+        setLoadedMoreNotifications(prev => [...prev, ...list]);
+        setNotificationsLastDoc(snapshot.docs[snapshot.docs.length - 1]);
+      }
+    } catch (err) {
+      console.error("Load more notifications error:", err);
+    }
+  };
+
   const handleMarkAsRead = async (notifId: string) => {
     if (!user) return;
-    const isLocalGuest = localStorage.getItem('isLocalGuest') === 'true';
-
-    if (isLocalGuest) {
-      const key = `notifications_${user.id}`;
-      const updated = notifications.map(n => n.id === notifId ? { ...n, read: true } : n);
-      setNotifications(updated);
-      localStorage.setItem(key, JSON.stringify(updated));
-    } else {
-      try {
-        await updateDoc(doc(db, 'users', user.id, 'notifications', notifId), { read: true });
-      } catch (err) {
-        console.error("Mark read error:", err);
-      }
+    try {
+      await updateDoc(doc(db, 'users', user.id, 'notifications', notifId), { read: true });
+    } catch (err) {
+      console.error("Mark read error:", err);
     }
   };
 
   const handleMarkAllAsRead = async () => {
     if (!user) return;
-    const isLocalGuest = localStorage.getItem('isLocalGuest') === 'true';
-
-    if (isLocalGuest) {
-      const key = `notifications_${user.id}`;
-      const updated = notifications.map(n => ({ ...n, read: true }));
-      setNotifications(updated);
-      localStorage.setItem(key, JSON.stringify(updated));
-    } else {
-      const unreads = notifications.filter(n => !n.read);
-      for (const n of unreads) {
-        try {
-          await updateDoc(doc(db, 'users', user.id, 'notifications', n.id), { read: true });
-        } catch (err) {
-          console.error("Mark all read error:", err);
-        }
+    const unreads = notifications.filter(n => !n.read);
+    for (const n of unreads) {
+      try {
+        await updateDoc(doc(db, 'users', user.id, 'notifications', n.id), { read: true });
+      } catch (err) {
+        console.error("Mark all read error:", err);
       }
     }
   };
@@ -214,7 +220,7 @@ export default function App() {
       bathrooms: request.bathrooms,
       estateName: request.estateName,
       amenities: request.amenities,
-      listingFeeStatus: 'Unpaid',
+      listingFeeStatus: 'Monthly Unpaid',
       listingFeePaidAt: request.listingFeePaidAt || '',
       dealStatus: 'Open',
       bidWindowOpensAt: new Date().toISOString(),
@@ -243,17 +249,6 @@ export default function App() {
       return;
     }
     
-    // Check local guest properties
-    const savedBytes = localStorage.getItem('localGuestProperties');
-    if (savedBytes) {
-      const parsed = JSON.parse(savedBytes);
-      const found = parsed.find((p: any) => p.id === selectedPropertyId);
-      if (found) {
-        setSelectedLiveProperty(found);
-        return;
-      }
-    }
-
     // Fetch from Firestore
     const docRef = doc(db, 'properties', selectedPropertyId);
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
@@ -300,9 +295,7 @@ export default function App() {
     return <Login />;
   }
 
-  const isSignUpFlow = sessionStorage.getItem('isSignUpFlow') === 'true';
-
-  if (!user.phoneVerified && isSignUpFlow) {
+  if (!(user as any).phoneVerified) {
     return <PhoneVerification />;
   }
 
@@ -564,6 +557,7 @@ export default function App() {
             onMarkAsRead={handleMarkAsRead}
             onMarkAllAsRead={handleMarkAllAsRead}
             onNavigateToProperty={handleNavigateToProperty}
+            onLoadMore={loadMoreNotifications}
           />
         )}
       </AnimatePresence>

@@ -133,6 +133,7 @@ export default function AgentBidding({ onViewLeaderboard }: { onViewLeaderboard?
     listingRequests,
     platformListings = [],
     updateListingRequest,
+    loadMorePlatformListings,
   } = useAuth();
   const { setActiveTab } = useNavigation();
 
@@ -791,6 +792,19 @@ export default function AgentBidding({ onViewLeaderboard }: { onViewLeaderboard?
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {biddingListings.length > 0 && biddingListings.length % 15 === 0 && (
+            <div className="flex justify-center mt-6">
+              <button
+                type="button"
+                onClick={loadMorePlatformListings}
+                className="brutalist-button-teal px-8 py-2.5 text-xs text-brand-black"
+                id="load-more-listings-btn"
+              >
+                LOAD MORE LISTINGS
+              </button>
             </div>
           )}
         </div>

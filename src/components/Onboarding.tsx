@@ -10,7 +10,9 @@ import {
   Shield, 
   Check, 
   Loader2,
-  Info 
+  Info,
+  CheckCircle,
+  Upload
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { cn } from '../lib/utils';
@@ -37,15 +39,33 @@ export default function Onboarding() {
 
   const [agreedToTerms, setAgreedToTerms] = useState(false);
 
+  // KYC specific state
+  const [ninNumber, setNinNumber] = useState('');
+  const [kycFiles, setKycFiles] = useState<string[]>([]);
+  const [uploadedKycFiles, setUploadedKycFiles] = useState<Record<string, string>>({});
+  const [ninError, setNinError] = useState<string | null>(null);
+
+  const totalSteps = selectedRole === 'Agent' ? 5 : 3;
+
   // Form validation for step 2
   const isStep2Valid = () => {
-    const { firstName, lastName, name, phoneNumber } = formData;
-    return !!(firstName.trim() && lastName.trim() && name.trim() && phoneNumber.trim());
+    const { firstName, lastName, name } = formData;
+    return !!(firstName.trim() && lastName.trim() && name.trim());
   };
 
   const handleNextStep = () => {
     if (step === 1 && !selectedRole) return;
     if (step === 2 && !isStep2Valid()) return;
+    if (step === 3 && selectedRole === 'Agent') {
+      setNinError(null);
+      if (ninNumber.length !== 11) {
+        setNinError("NIN must be exactly 11 digits.");
+        return;
+      }
+      if (kycFiles.length < 1 || Object.keys(uploadedKycFiles).length < 1) {
+        return;
+      }
+    }
     setError(null);
     setStep((prev) => prev + 1);
   };
@@ -78,6 +98,10 @@ export default function Onboarding() {
 
     if (isAgent) {
       updates.isAgent = true;
+      updates.kycStatus = 'Pending';
+      updates.ninNumber = ninNumber;
+      updates.kycDocuments = kycFiles;
+
       if (hasRegNumber) {
         updates.agentRegNumber = formData.agentRegNumber;
         updates.agentTier = 'Verified Professional' as AgentTier;
@@ -136,23 +160,26 @@ export default function Onboarding() {
           <div className="absolute top-[18px] left-0 right-0 h-1 bg-zinc-300 dark:bg-zinc-800 -z-10 rounded"></div>
           <div 
             className="absolute top-[18px] left-0 h-1 bg-brand-black dark:bg-brand-teal -z-10 rounded transition-all duration-300"
-            style={{ width: `${((step - 1) / 2) * 100}%` }}
+            style={{ width: `${((step - 1) / (totalSteps - 1)) * 100}%` }}
           ></div>
-          {[1, 2, 3].map((s) => (
-            <div 
-              key={s} 
-              className={cn(
-                "w-10 h-10 border-4 rounded-none flex items-center justify-center font-black transition-all",
-                step === s 
-                  ? "bg-brand-teal text-white border-brand-black dark:border-brand-teal shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_0px_#14b8a6]"
-                  : step > s 
-                    ? "bg-brand-black text-white border-brand-black shadow-none"
-                    : "bg-white dark:bg-zinc-900 text-zinc-400 dark:text-zinc-600 border-zinc-200 dark:border-zinc-800"
-              )}
-            >
-              {s}
-            </div>
-          ))}
+          {Array.from({ length: totalSteps }).map((_, idx) => {
+            const s = idx + 1;
+            return (
+              <div 
+                key={s} 
+                className={cn(
+                  "w-10 h-10 border-4 rounded-none flex items-center justify-center font-black transition-all",
+                  step === s 
+                    ? "bg-brand-teal text-white border-brand-black dark:border-brand-teal shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_0px_#14b8a6]"
+                    : step > s 
+                      ? "bg-brand-black text-white border-brand-black shadow-none"
+                      : "bg-white dark:bg-zinc-900 text-zinc-400 dark:text-zinc-600 border-zinc-200 dark:border-zinc-800"
+                )}
+              >
+                {s}
+              </div>
+            );
+          })}
         </div>
 
         <AnimatePresence mode="wait">
@@ -167,7 +194,7 @@ export default function Onboarding() {
             >
               <div className="text-center mb-8">
                 <span className="bg-brand-teal text-white border-2 border-brand-black px-3 py-1 font-black text-xs uppercase tracking-wider shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
-                  Step 1 of 3
+                  Step 1 of {totalSteps}
                 </span>
                 <h1 className="text-3xl md:text-4xl font-black uppercase italic tracking-tighter text-brand-black dark:text-white mt-4">
                   Who are you on RealAgents?
@@ -242,7 +269,7 @@ export default function Onboarding() {
             >
               <div className="text-center mb-8">
                 <span className="bg-brand-teal text-white border-2 border-brand-black px-3 py-1 font-black text-xs uppercase tracking-wider shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
-                  Step 2 of 3
+                  Step 2 of {totalSteps}
                 </span>
                 <h1 className="text-3xl font-black uppercase italic tracking-tighter text-brand-black dark:text-white mt-4">
                   Identity Setup
@@ -296,17 +323,18 @@ export default function Onboarding() {
                       placeholder="e.g. LandlordPro"
                     />
                   </div>
-                  <div className="space-y-1.5">
+                  <div className="space-y-1.5 opacity-80 cursor-not-allowed" title="Phone number is verified and cannot be changed here.">
                     <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider flex items-center gap-1">
-                      Phone Number <span className="text-brand-red font-black text-xs">*</span>
+                      Phone Number <Check size={12} className="text-brand-teal ml-1" /> <span className="text-brand-teal text-[9px]">VERIFIED</span>
                     </label>
                     <input 
                       type="tel"
                       required
+                      readOnly
+                      disabled
                       value={formData.phoneNumber}
-                      onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
-                      className="w-full px-4 py-3 border-4 border-brand-black dark:border-zinc-700 bg-white dark:bg-zinc-800 text-brand-black dark:text-white font-black text-sm uppercase tracking-wider focus:outline-none focus:border-brand-teal dark:focus:border-brand-teal focus:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all placeholder-zinc-400"
-                      placeholder="e.g. +234 8... or 080..."
+                      className="w-full px-4 py-3 border-4 border-brand-black dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 font-black text-sm uppercase tracking-wider focus:outline-none cursor-not-allowed"
+                      placeholder="e.g. +234 8..."
                     />
                   </div>
                 </div>
@@ -326,84 +354,6 @@ export default function Onboarding() {
                     <option value="Other">Non-Binary / Other</option>
                   </select>
                 </div>
-
-                {selectedRole === 'Agent' && (
-                  <div className="mt-8 pt-8 border-t-4 border-dashed border-brand-black dark:border-zinc-800 space-y-6">
-                    <h3 className="text-lg font-black uppercase text-brand-black dark:text-white tracking-tight flex items-center gap-2">
-                      <ShieldCheck size={20} className="text-amber-500" />
-                      Agent Credentials
-                    </h3>
-
-                    {/* Prominent Info Box in Amber/Gold */}
-                    <div className="bg-amber-50 dark:bg-amber-950/20 border-4 border-amber-500 dark:border-amber-400/50 p-4 shadow-[4px_4px_0px_0px_rgba(245,158,11,0.2)]">
-                      <div className="flex gap-3">
-                        <Info className="text-amber-600 dark:text-amber-400 shrink-0" size={18} />
-                        <p className="text-xs font-bold text-amber-900 dark:text-amber-200 leading-relaxed uppercase">
-                          RealAgents welcomes both NIESV-registered professionals and independent practitioners.
-                          Your registration number is optional — but providing it unlocks Verified Professional status
-                          and gives your bids priority visibility with sellers.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">
-                        Registration Number (Optional)
-                      </label>
-                      <input 
-                        type="text"
-                        value={formData.agentRegNumber}
-                        onChange={(e) => setFormData({ ...formData, agentRegNumber: e.target.value })}
-                        className="w-full px-4 py-3 border-4 border-brand-black dark:border-zinc-700 bg-white dark:bg-zinc-800 text-brand-black dark:text-white font-black text-sm uppercase tracking-wider focus:outline-none focus:border-brand-teal dark:focus:border-brand-teal focus:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all placeholder-zinc-400"
-                        placeholder="e.g. NIESV/2024/ABJ/0042"
-                      />
-                      <p className="text-[10px] text-zinc-500 dark:text-zinc-400 font-bold uppercase tracking-wide">
-                        NIESV, ESVARBON, or any recognised state body number. Leave blank if you don't have one.
-                      </p>
-                    </div>
-
-                    {/* Previews */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
-                      {/* Card A */}
-                      <div className={cn(
-                        "p-4 border-4 transition-all",
-                        formData.agentRegNumber.trim().length > 0
-                          ? "bg-brand-teal/10 border-brand-black dark:border-brand-teal shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_#14b8a6]"
-                          : "bg-zinc-50 dark:bg-zinc-800/45 border-zinc-200 dark:border-zinc-800 opacity-60 scale-95"
-                      )}>
-                        <h4 className="text-xs font-black uppercase text-brand-black dark:text-white flex items-center gap-1.5 mb-2">
-                          <ShieldCheck size={14} className="text-brand-teal" />
-                          Verified Professional
-                        </h4>
-                        <ul className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide space-y-1 list-disc list-inside">
-                          <li>Priority placement in seller bid reviews</li>
-                          <li>Inherited credibility from regulatory status</li>
-                          <li>Starts at Trust Score 70</li>
-                          <li>Unlocked by: providing a registration number</li>
-                        </ul>
-                      </div>
-
-                      {/* Card B */}
-                      <div className={cn(
-                        "p-4 border-4 transition-all",
-                        formData.agentRegNumber.trim().length === 0
-                          ? "bg-zinc-100 dark:bg-zinc-800 border-brand-black dark:border-zinc-650 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]"
-                          : "bg-zinc-50 dark:bg-zinc-800/45 border-zinc-200 dark:border-zinc-800 opacity-60 scale-95"
-                      )}>
-                        <h4 className="text-xs font-black uppercase text-zinc-600 dark:text-zinc-300 flex items-center gap-1.5 mb-2">
-                          <Shield size={14} className="text-zinc-400 dark:text-zinc-500" />
-                          Platform Agent
-                        </h4>
-                        <ul className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide space-y-1 list-disc list-inside">
-                          <li>Full access to all listings and bidding</li>
-                          <li>Trust Score built through performance</li>
-                          <li>Starts at Trust Score 40</li>
-                          <li>Unlocked by: KYC verification only</li>
-                        </ul>
-                      </div>
-                    </div>
-                  </div>
-                )}
               </div>
 
               <div className="flex justify-between items-center mt-10 pt-6 border-t-2 border-zinc-100 dark:border-zinc-800">
@@ -424,7 +374,247 @@ export default function Onboarding() {
             </motion.div>
           )}
 
-          {step === 3 && (
+          {step === 3 && selectedRole === 'Agent' && (
+            <motion.div
+              key="step3"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.25 }}
+              className="bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-800 shadow-[8px_8px_0px_0px_rgba(0,0,0,0.9)] p-6 md:p-10 max-w-2xl mx-auto"
+            >
+              <div className="text-center mb-8">
+                <span className="bg-brand-teal text-white border-2 border-brand-black px-3 py-1 font-black text-xs uppercase tracking-wider shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
+                  Step 3 of 5
+                </span>
+                <h1 className="text-3xl font-black uppercase italic tracking-tighter text-brand-black dark:text-white mt-4">
+                  KYC Verification
+                </h1>
+                <p className="text-sm font-bold text-zinc-500 uppercase tracking-wide mt-1">
+                  Upload your documents for administrative approval
+                </p>
+              </div>
+
+              <div className="space-y-6">
+                <div className="bg-white dark:bg-zinc-900 border-2 border-brand-black p-4 shadow-brutal-xs">
+                  <label className="text-[10px] font-black uppercase text-brand-black dark:text-gray-150 tracking-wider mb-1 block">
+                    National Identification Number (NIN)
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={11}
+                    value={ninNumber}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/\D/g, "");
+                      setNinNumber(val);
+                      if (ninError) setNinError(null);
+                    }}
+                    placeholder="Enter 11-digit NIN"
+                    className={cn(
+                      "w-full bg-zinc-50 dark:bg-zinc-950 border-2 p-3 text-sm font-black tracking-widest focus:outline-none transition-all dark:text-white",
+                      ninError
+                        ? "border-brand-red focus:border-brand-red"
+                        : "border-brand-black dark:border-zinc-700 focus:border-brand-teal"
+                    )}
+                  />
+                  {ninError && (
+                    <p className="text-brand-red text-[10px] font-bold mt-1 uppercase tracking-tight">
+                      {ninError}
+                    </p>
+                  )}
+                </div>
+
+                <div className="space-y-3">
+                  <h5 className="text-[10px] font-black uppercase text-brand-black dark:text-gray-300 tracking-wider border-b-2 border-dashed border-zinc-200 dark:border-zinc-800 pb-2">
+                    Required Documents (Select at least one)
+                  </h5>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {[
+                      { id: "nin_slip", label: "NIN Slip" },
+                      { id: "intl_passport", label: "Intl. Passport" },
+                      { id: "drivers_license", label: "Driver's License" },
+                      { id: "voters_card", label: "Voter's Card" },
+                    ].map((doc) => {
+                      const isSelected = kycFiles.includes(doc.id);
+                      const fileName = uploadedKycFiles[doc.id];
+                      return (
+                        <div key={doc.id} className="flex flex-col gap-1">
+                          <label
+                            className={cn(
+                              "flex items-center gap-3 p-3 border-2 cursor-pointer transition-all",
+                              isSelected
+                                ? "border-brand-teal bg-brand-teal/10 text-brand-black dark:text-brand-teal"
+                                : "border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 opacity-60 hover:opacity-100 text-zinc-500 dark:text-zinc-400"
+                            )}
+                          >
+                            <input
+                              type="checkbox"
+                              className="hidden"
+                              checked={isSelected}
+                              onChange={() =>
+                                setKycFiles(
+                                  isSelected
+                                    ? kycFiles.filter((f) => f !== doc.id)
+                                    : [...kycFiles, doc.id]
+                                )
+                              }
+                            />
+                            <span className="text-[10px] font-black uppercase flex-1">
+                              {doc.label}
+                            </span>
+                            {isSelected && (
+                              <CheckCircle size={14} className="text-brand-teal" />
+                            )}
+                          </label>
+                          {isSelected && (
+                            <div className="p-2 border-2 border-t-0 border-brand-teal bg-white dark:bg-zinc-950">
+                              <label className="flex items-center justify-center gap-2 border-2 border-dashed border-brand-black/20 dark:border-zinc-700 p-2 cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-900">
+                                <Upload size={14} className="text-brand-teal" />
+                                <span className="text-[9px] font-bold uppercase truncate max-w-[120px] dark:text-zinc-300">
+                                  {fileName || "Upload File"}
+                                </span>
+                                <input
+                                  type="file"
+                                  className="hidden"
+                                  accept=".jpg,.jpeg,.png,.pdf"
+                                  onChange={(e) => {
+                                    if (e.target.files?.[0]) {
+                                      setUploadedKycFiles((prev) => ({
+                                        ...prev,
+                                        [doc.id]: e.target.files![0].name,
+                                      }));
+                                    }
+                                  }}
+                                />
+                              </label>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-between pt-6 mt-6 border-t-2 border-zinc-100 dark:border-zinc-800">
+                <button
+                  onClick={handleBackStep}
+                  className="px-6 py-4 border-4 border-brand-black dark:border-zinc-700 bg-white dark:bg-zinc-800 text-brand-black dark:text-white font-black uppercase tracking-widest text-xs flex items-center gap-2 hover:bg-zinc-50 dark:hover:bg-zinc-700 active:translate-y-1 transition-all"
+                >
+                  <ArrowLeft size={16} /> Back
+                </button>
+                <button
+                  disabled={kycFiles.length < 1 || Object.keys(uploadedKycFiles).length < 1 || ninNumber.length !== 11}
+                  onClick={handleNextStep}
+                  className={cn(
+                    "px-8 py-4 bg-brand-black dark:bg-brand-teal text-white font-black uppercase tracking-widest text-xs flex items-center gap-3 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 transition-all",
+                    (kycFiles.length < 1 || Object.keys(uploadedKycFiles).length < 1 || ninNumber.length !== 11) ? "opacity-50 cursor-not-allowed shadow-none" : ""
+                  )}
+                >
+                  Continue <ArrowRight size={16} />
+                </button>
+              </div>
+            </motion.div>
+          )}
+
+          {step === 4 && selectedRole === 'Agent' && (
+            <motion.div
+              key="step4"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.25 }}
+              className="bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-800 shadow-[8px_8px_0px_0px_rgba(0,0,0,0.9)] p-6 md:p-10 max-w-2xl mx-auto"
+            >
+              <div className="text-center mb-8">
+                <span className="bg-brand-teal text-white border-2 border-brand-black px-3 py-1 font-black text-xs uppercase tracking-wider shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
+                  Step 4 of 5
+                </span>
+                <h1 className="text-3xl font-black uppercase italic tracking-tighter text-brand-black dark:text-white mt-4">
+                  Agent Credentials
+                </h1>
+                <p className="text-sm font-bold text-zinc-500 uppercase tracking-wide mt-1">
+                  Optional: Provide your regulatory body registration number
+                </p>
+              </div>
+
+              <div className="space-y-6">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">
+                    Registration Number (Optional)
+                  </label>
+                  <input 
+                    type="text"
+                    value={formData.agentRegNumber}
+                    onChange={(e) => setFormData({ ...formData, agentRegNumber: e.target.value })}
+                    className="w-full px-4 py-3 border-4 border-brand-black dark:border-zinc-700 bg-white dark:bg-zinc-800 text-brand-black dark:text-white font-black text-sm uppercase tracking-wider focus:outline-none focus:border-brand-teal dark:focus:border-brand-teal focus:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all placeholder-zinc-400"
+                    placeholder="e.g. NIESV/2024/ABJ/0042"
+                  />
+                  <p className="text-[10px] text-zinc-500 dark:text-zinc-400 font-bold uppercase tracking-wide">
+                    NIESV, ESVARBON, or any recognised state body number. Leave blank if you don't have one.
+                  </p>
+                </div>
+
+                {/* Previews */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+                  {/* Card A */}
+                  <div className={cn(
+                    "p-4 border-4 transition-all",
+                    formData.agentRegNumber.trim().length > 0
+                      ? "bg-brand-teal/10 border-brand-black dark:border-brand-teal shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_#14b8a6]"
+                      : "bg-zinc-50 dark:bg-zinc-800/45 border-zinc-200 dark:border-zinc-800 opacity-60 scale-95"
+                  )}>
+                    <h4 className="text-xs font-black uppercase text-brand-black dark:text-white flex items-center gap-1.5 mb-2">
+                      <ShieldCheck size={14} className="text-brand-teal" />
+                      Verified Professional
+                    </h4>
+                    <ul className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide space-y-1 list-disc list-inside">
+                      <li>Priority placement in seller bid reviews</li>
+                      <li>Inherited credibility from regulatory status</li>
+                      <li>Starts at Trust Score 70</li>
+                      <li>Unlocked by: providing a registration number</li>
+                    </ul>
+                  </div>
+
+                  {/* Card B */}
+                  <div className={cn(
+                    "p-4 border-4 transition-all",
+                    formData.agentRegNumber.trim().length === 0
+                      ? "bg-zinc-100 dark:bg-zinc-800 border-brand-black dark:border-zinc-650 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]"
+                      : "bg-zinc-50 dark:bg-zinc-800/45 border-zinc-200 dark:border-zinc-800 opacity-60 scale-95"
+                  )}>
+                    <h4 className="text-xs font-black uppercase text-zinc-600 dark:text-zinc-300 flex items-center gap-1.5 mb-2">
+                      <Shield size={14} className="text-zinc-400 dark:text-zinc-500" />
+                      Platform Agent
+                    </h4>
+                    <ul className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide space-y-1 list-disc list-inside">
+                      <li>Full access to all listings and bidding once approved</li>
+                      <li>Trust Score built through performance</li>
+                      <li>Starts at Trust Score 30</li>
+                      <li>Unlocked by: KYC verification only</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-between pt-6 mt-6 border-t-2 border-zinc-100 dark:border-zinc-800">
+                <button
+                  onClick={handleBackStep}
+                  className="px-6 py-4 border-4 border-brand-black dark:border-zinc-700 bg-white dark:bg-zinc-800 text-brand-black dark:text-white font-black uppercase tracking-widest text-xs flex items-center gap-2 hover:bg-zinc-50 dark:hover:bg-zinc-700 active:translate-y-1 transition-all"
+                >
+                  <ArrowLeft size={16} /> Back
+                </button>
+                <button
+                  onClick={handleNextStep}
+                  className="px-8 py-4 bg-brand-black dark:bg-brand-teal text-white font-black uppercase tracking-widest text-xs flex items-center gap-3 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-y-1 transition-all"
+                >
+                  Continue <ArrowRight size={16} />
+                </button>
+              </div>
+            </motion.div>
+          )}
+
+          {((step === 3 && selectedRole !== 'Agent') || step === 5) && (
             <motion.div
               key="step3"
               initial={{ opacity: 0, y: 20 }}
@@ -435,7 +625,7 @@ export default function Onboarding() {
             >
               <div className="text-center mb-8">
                 <span className="bg-brand-teal text-white border-2 border-brand-black px-3 py-1 font-black text-xs uppercase tracking-wider shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
-                  Step 3 of 3
+                  Step {step} of {totalSteps}
                 </span>
                 <h1 className="text-3xl font-black uppercase italic tracking-tighter text-brand-black dark:text-white mt-4">
                   Confirm Your Setup

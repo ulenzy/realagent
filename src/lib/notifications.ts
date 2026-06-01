@@ -22,31 +22,6 @@ export async function sendNotification(userId: string, event: NotificationEvent)
   const { type, title, body, data } = event;
   const targetData = data || {};
 
-  // For offline local guests, save to localStorage
-  const isLocalGuest = localStorage.getItem('isLocalGuest') === 'true';
-  if (isLocalGuest) {
-    try {
-      const notifyId = `notify-${Date.now()}`;
-      const newNotif = {
-        id: notifyId,
-        title,
-        body,
-        type,
-        data: targetData,
-        read: false,
-        createdAt: new Date().toISOString()
-      };
-      const key = `notifications_${userId}`;
-      const stored = localStorage.getItem(key);
-      const list = stored ? JSON.parse(stored) : [];
-      list.unshift(newNotif);
-      localStorage.setItem(key, JSON.stringify(list));
-      window.dispatchEvent(new Event('storage'));
-    } catch (localErr) {
-      console.error('Failed to save notification locally:', localErr);
-    }
-  }
-
   try {
     // 1. Write in-app notification to users/{userId}/notifications subcollection
     const notificationsCol = collection(db, 'users', userId, 'notifications');
