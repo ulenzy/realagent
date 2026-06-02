@@ -29,14 +29,6 @@ export default function AgentProfile() {
       <div className="relative">
         <div className="h-48 bg-brand-teal flex items-end justify-center pb-4 relative overflow-hidden">
           <div className="absolute top-0 left-0 w-full h-full opacity-20 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')]" />
-          <motion.button 
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            onClick={onBack}
-            className="absolute top-6 left-6 p-3 bg-brand-black text-white rounded-none border-2 border-brand-teal shadow-brutal hover:translate-x-1 hover:translate-y-1 hover:shadow-none transition-all z-10"
-          >
-            <ArrowLeft className="w-6 h-6" />
-          </motion.button>
         </div>
 
         <div className="max-w-5xl mx-auto px-6 -mt-24 relative z-20 pb-12">

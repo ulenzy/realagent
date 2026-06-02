@@ -38,6 +38,7 @@ export default function Onboarding() {
   });
 
   const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const [isAgeVerified, setIsAgeVerified] = useState(false);
 
   // KYC specific state
   const [ninNumber, setNinNumber] = useState('');
@@ -76,7 +77,7 @@ export default function Onboarding() {
   };
 
   const handleSubmit = async () => {
-    if (!selectedRole || !agreedToTerms) return;
+    if (!selectedRole || !agreedToTerms || !isAgeVerified) return;
     setIsSubmitting(true);
     setError(null);
 
@@ -91,6 +92,7 @@ export default function Onboarding() {
       name: formData.name,
       phoneNumber: formData.phoneNumber,
       gender: formData.gender,
+      ageVerified: true,
       onboardingCompleted: true,
       profileScore: 20,
       kycStatus: 'None' as any,
@@ -736,10 +738,11 @@ export default function Onboarding() {
               )}
 
               {/* Checkbox */}
-              <div className="mb-6 p-1">
+              <div className="mb-4 p-1">
                 <label className="flex items-start gap-3 cursor-pointer group">
-                  <div className="relative shrink-0 mt-0.5">
+                  <div className="relative shrink-0 mt-0.5" id="onboarding-terms-checkbox-container">
                     <input 
+                      id="onboarding-terms-checkbox"
                       type="checkbox"
                       checked={agreedToTerms}
                       onChange={(e) => setAgreedToTerms(e.target.checked)}
@@ -753,7 +756,31 @@ export default function Onboarding() {
                     </div>
                   </div>
                   <span className="text-[11px] font-black uppercase text-brand-black dark:text-zinc-300 leading-tight select-none mt-1">
-                    I agree to the RealAgents Platform Terms and Agent Conduct Guidelines.
+                    I agree to the RealAgents Platform Terms and Agent Conduct Guidelines. <span className="text-brand-red font-black">*</span>
+                  </span>
+                </label>
+              </div>
+
+              {/* Age verification Checkbox */}
+              <div className="mb-6 p-1">
+                <label className="flex items-start gap-3 cursor-pointer group">
+                  <div className="relative shrink-0 mt-0.5" id="onboarding-age-checkbox-container">
+                    <input 
+                      id="onboarding-age-checkbox"
+                      type="checkbox"
+                      checked={isAgeVerified}
+                      onChange={(e) => setIsAgeVerified(e.target.checked)}
+                      className="sr-only"
+                    />
+                    <div className={cn(
+                      "w-6 h-6 border-4 border-brand-black dark:border-zinc-700 flex items-center justify-center transition-all",
+                      isAgeVerified ? "bg-brand-teal" : "bg-white dark:bg-zinc-800 group-hover:bg-zinc-100 dark:group-hover:bg-zinc-700"
+                    )}>
+                      {isAgeVerified && <Check size={14} className="text-white stroke-[4]" />}
+                    </div>
+                  </div>
+                  <span className="text-[11px] font-black uppercase text-brand-black dark:text-zinc-300 leading-tight select-none mt-1">
+                    I confirm that I am 18 years of age or older <span className="text-brand-red font-black">*</span>
                   </span>
                 </label>
               </div>
@@ -768,7 +795,8 @@ export default function Onboarding() {
                   <ArrowLeft size={16} /> Back
                 </button>
                 <button
-                  disabled={!agreedToTerms || isSubmitting}
+                  id="onboarding-activate-btn"
+                  disabled={!agreedToTerms || !isAgeVerified || isSubmitting}
                   onClick={handleSubmit}
                   className="px-8 py-4 bg-brand-black dark:bg-brand-teal text-white font-black uppercase tracking-widest text-xs flex items-center gap-3 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-y-1 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
                 >

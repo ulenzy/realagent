@@ -10,7 +10,7 @@
 
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Home, Search, FileText, Zap, MessageCircle, Moon, Sun, Gavel, Heart, Store, Sparkles, LayoutDashboard, Plus, ShieldAlert, Info, Settings, Bell } from 'lucide-react';
+import { Home, Search, FileText, Zap, MessageCircle, Moon, Sun, Gavel, Heart, Store, Sparkles, LayoutDashboard, Plus, ShieldAlert, Info, Settings, Bell, ArrowLeft, Share2 } from 'lucide-react';
 import { cn } from './lib/utils';
 import { mockProperties } from './data/mockListings';
 import { ListingRequest, Property } from './types';
@@ -27,6 +27,7 @@ import Messaging from './components/Messaging';
 import Login from './components/Login';
 import Onboarding from './components/Onboarding';
 import PhoneVerification from './components/PhoneVerification';
+import CompleteProfile from './components/CompleteProfile';
 import logoImage from './assets/images/logo.png';
 import { useAuth } from './context/AuthContext';
 import { useNavigation } from './context/NavigationContext';
@@ -62,6 +63,67 @@ export default function App() {
 
   const [showWelcomeToast, setShowWelcomeToast] = React.useState(false);
   const toastActionDone = React.useRef(false);
+
+  // Unified global and subpage back-button header states
+  const [profileView, setProfileView] = React.useState('main');
+
+  React.useEffect(() => {
+    const handleViewChange = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      setProfileView(customEvent.detail?.view || 'main');
+    };
+    window.addEventListener('profile-view-changed', handleViewChange);
+    return () => window.removeEventListener('profile-view-changed', handleViewChange);
+  }, []);
+
+  const isProfileActive = activeTab === 'profile';
+  const isSubPageActive = !!isListingFlow || !!selectedAgentId || !!selectedPropertyId;
+  const showHomeBar = !isProfileActive && !isSubPageActive;
+
+  // Let's scroll to top when navigation states change, and close any overlay containers (as requested)
+  React.useEffect(() => {
+    setIsNotificationOpen(false);
+    setIsMessagingOpen(false);
+    
+    // Smooth high-reliability reset scroll position to top
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    document.documentElement.scrollTop = 0;
+    if (document.body) {
+      document.body.scrollTop = 0;
+    }
+  }, [activeTab, selectedPropertyId, selectedAgentId, isListingFlow]);
+
+  let headerTitle = "DETAILS";
+  if (isListingFlow) {
+    headerTitle = "NEW PROPERTY LISTING";
+  } else if (selectedAgentId) {
+    headerTitle = "VERIFIED AGENT PROFILE";
+  } else if (selectedPropertyId) {
+    headerTitle = "PROPERTY DETAIL VIEW";
+  } else if (isProfileActive) {
+    if (profileView === 'main') {
+      headerTitle = "MY PROFILE & WORKSPACE";
+    } else {
+      headerTitle = profileView.toUpperCase();
+    }
+  }
+
+  const handleBackClick = () => {
+    if (isProfileActive) {
+      const event = new CustomEvent('profile-back-click', { cancelable: true });
+      const defaultPrevented = !window.dispatchEvent(event);
+      if (!defaultPrevented) {
+        setActiveTab('marketplace');
+        handleBackToMarketplace();
+      }
+    } else if (isListingFlow) {
+      setIsListingFlow(false);
+    } else if (selectedAgentId) {
+      setSelectedAgentId(null);
+    } else if (selectedPropertyId) {
+      setSelectedPropertyId(null);
+    }
+  };
 
   // Notifications
   const [liveNotifications, setLiveNotifications] = React.useState<any[]>([]);
@@ -291,16 +353,15 @@ export default function App() {
     );
   }
 
-  if (!user) {
+  if (!firebaseUser) {
     return <Login />;
   }
 
-  if (!(user as any).phoneVerified) {
-    return <PhoneVerification />;
-  }
+  // Check if any required field is missing from Firestore user profile for post-login profile validation
+  const isProfileIncomplete = !user || !user.username?.trim() || !user.phoneNumber?.trim() || !user.name?.trim() || !user.onboardingCompleted;
 
-  if (!user.onboardingCompleted) {
-    return <Onboarding />;
+  if (isProfileIncomplete) {
+    return <CompleteProfile />;
   }
 
   if (user.accountStatus === 'Suspended' || user.accountStatus === 'Banned') {
@@ -384,49 +445,85 @@ export default function App() {
       </AnimatePresence>
 
       {/* Header - Global */}
-      <header className="aggressive-header">
-        <div className="flex items-center gap-3 cursor-pointer" onClick={() => { setActiveTab('marketplace'); handleBackToMarketplace(); }}>
-          <img src={logoImage} alt="RealAgents Logo" className="w-[115px] h-[26px] drop-shadow-[2px_2px_0_rgba(0,24,41,1)] object-contain rounded-md" />
-        </div>
-        <div className="flex gap-4">
-          <button
-            onClick={() => openChat()}
-            className="p-2 border-2 border-brand-black bg-white dark:bg-zinc-900 shadow-brutal-sm hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all flex items-center justify-center rounded-full dark:border-zinc-700 dark:shadow-[2px_2px_0px_0px_#52525b] relative"
-            aria-label="Messages"
-          >
-            <MessageCircle className="w-5 h-5 text-brand-black dark:text-white" />
-            <span className="absolute -top-1 -right-1 w-4 h-4 bg-brand-red text-white text-[8px] font-black flex items-center justify-center rounded-full border border-brand-black">2</span>
-          </button>
-          
-          {user && (
-            <button
-              onClick={() => setIsNotificationOpen(true)}
-              className="p-2 border-2 border-brand-black bg-white dark:bg-zinc-900 shadow-brutal-sm hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all flex items-center justify-center rounded-full dark:border-zinc-700 dark:shadow-[2px_2px_0px_0px_#52525b] relative"
-              aria-label="Notifications"
-              id="notification-bell-btn"
-            >
-              <Bell className="w-5 h-5 text-brand-black dark:text-white" />
-              {notifications.filter(n => !n.read).length > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 bg-brand-teal text-brand-black text-[8px] font-black flex items-center justify-center rounded-full border border-brand-black animate-pulse">
-                  {notifications.filter(n => !n.read).length}
-                </span>
-              )}
-            </button>
-          )}
-          <button 
-            onClick={() => { setActiveTab('profile'); handleBackToMarketplace(); }}
-            className={cn(
-              "hover:text-brand-teal transition-colors p-1 border-2 border-transparent hover:border-brand-black hover:bg-white dark:hover:bg-zinc-900 dark:hover:border-zinc-700 shadow-none hover:shadow-brutal-sm dark:hover:shadow-[2px_2px_0px_0px_#52525b] rounded-full",
-              activeTab === 'profile' && "border-brand-black bg-white dark:bg-zinc-900 shadow-brutal-sm dark:border-zinc-700 dark:shadow-[2px_2px_0px_0px_#52525b]"
-            )}
-            aria-label="My Profile"
-          >
-            <div className="w-8 h-8 rounded-full border-2 border-brand-black overflow-hidden bg-brand-teal shadow-brutal-sm">
-              <img src={getUserAvatarUrl(user)} alt="User" />
+      {!isProfileActive && (
+        showHomeBar ? (
+          <header className="aggressive-header">
+            <div className="flex items-center gap-3 cursor-pointer" onClick={() => { setActiveTab('marketplace'); handleBackToMarketplace(); }}>
+              <img src={logoImage} alt="RealAgents Logo" className="w-[115px] h-[26px] drop-shadow-[2px_2px_0_rgba(0,24,41,1)] object-contain rounded-md" />
             </div>
-          </button>
-        </div>
-      </header>
+            <div className="flex gap-4">
+              <button
+                onClick={() => openChat()}
+                className="p-2 border-2 border-brand-black bg-white dark:bg-zinc-900 shadow-brutal-sm hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all flex items-center justify-center rounded-full dark:border-zinc-700 dark:shadow-[2px_2px_0px_0px_#52525b] relative"
+                aria-label="Messages"
+              >
+                <MessageCircle className="w-5 h-5 text-brand-black dark:text-white" />
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-brand-red text-white text-[8px] font-black flex items-center justify-center rounded-full border border-brand-black">2</span>
+              </button>
+              
+              {user && (
+                <button
+                  onClick={() => setIsNotificationOpen(true)}
+                  className="p-2 border-2 border-brand-black bg-white dark:bg-zinc-900 shadow-brutal-sm hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all flex items-center justify-center rounded-full dark:border-zinc-700 dark:shadow-[2px_2px_0px_0px_#52525b] relative"
+                  aria-label="Notifications"
+                  id="notification-bell-btn"
+                >
+                  <Bell className="w-5 h-5 text-brand-black dark:text-white" />
+                  {notifications.filter(n => !n.read).length > 0 && (
+                    <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 bg-brand-teal text-brand-black text-[8px] font-black flex items-center justify-center rounded-full border border-brand-black animate-pulse">
+                      {notifications.filter(n => !n.read).length}
+                    </span>
+                  )}
+                </button>
+              )}
+              <button 
+                onClick={() => { setActiveTab('profile'); handleBackToMarketplace(); }}
+                className={cn(
+                  "hover:text-brand-teal transition-colors p-1 border-2 border-transparent hover:border-brand-black hover:bg-white dark:hover:bg-zinc-900 dark:hover:border-zinc-700 shadow-none hover:shadow-brutal-sm dark:hover:shadow-[2px_2px_0px_0px_#52525b] rounded-full",
+                  activeTab === 'profile' && "border-brand-black bg-white dark:bg-zinc-900 shadow-brutal-sm dark:border-zinc-700 dark:shadow-[2px_2px_0px_0px_#52525b]"
+                )}
+                aria-label="My Profile"
+              >
+                <div className="w-8 h-8 rounded-full border-2 border-brand-black overflow-hidden bg-brand-teal shadow-brutal-sm">
+                  <img src={getUserAvatarUrl(user)} alt="User" />
+                </div>
+              </button>
+            </div>
+          </header>
+        ) : (
+          <header className="aggressive-header">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleBackClick}
+                className="flex items-center gap-1.5 p-2 bg-brand-teal text-brand-black border-2 border-brand-black dark:border-zinc-700 shadow-brutal-xs font-display font-black text-[10px] uppercase tracking-wider hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all cursor-pointer rounded-none"
+                id="unified-back-button"
+              >
+                <ArrowLeft size={16} />
+                <span>BACK</span>
+              </button>
+              <h1 className="text-sm sm:text-lg font-display font-black uppercase tracking-tight italic text-brand-black dark:text-white ml-3">
+                {headerTitle}
+              </h1>
+            </div>
+            <div className="flex items-center gap-3">
+              {selectedPropertyId && selectedProperty && (
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => toggleSavedProperty?.(selectedProperty.id)}
+                    className="p-2 border-2 border-brand-black dark:border-zinc-700 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_0px_#52525b] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-colors bg-white dark:bg-zinc-900 hover:bg-brand-gray dark:hover:bg-zinc-800 rounded-none cursor-pointer"
+                    title={savedProperties.includes(selectedProperty.id) ? "Remove from saved" : "Save property"}
+                  >
+                    <Heart size={18} className={savedProperties.includes(selectedProperty.id) ? "fill-brand-red text-brand-red" : "text-brand-black dark:text-white"} />
+                  </button>
+                  <button className="p-2 border-2 border-brand-black dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_0px_#52525b] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none hover:bg-brand-gray dark:hover:bg-zinc-800 rounded-none cursor-pointer">
+                    <Share2 size={18} className="text-brand-black dark:text-white" />
+                  </button>
+                </div>
+              )}
+            </div>
+          </header>
+        )
+      )}
 
       {/* Main Content Area */}
       <main className={cn("flex-1 overflow-x-hidden", !selectedPropertyId && !isListingFlow && "pb-32")}>

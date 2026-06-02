@@ -3,6 +3,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { LogIn, Mail, Facebook, Shield, AlertCircle, Loader2, User, Lock } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { cn } from '../lib/utils';
+import SignupFlow from './SignupFlow';
+import { logAuthFailureToCrashlytics } from '../lib/firebase';
 
 export default function Login() {
   const { 
@@ -18,12 +20,29 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const [lastAttempt, setLastAttempt] = useState(0);
 
+  // Sign up flow flag
+  const [isSigningUp, setIsSigningUp] = useState(false);
+  const [providerHint, setProviderHint] = useState<string | null>(null);
+  const [rememberMe, setRememberMe] = useState(
+    localStorage.getItem('realagents_remember_me') !== 'false'
+  );
+
   // Email login state
   const [useEmail, setUseEmail] = useState(false);
   const [emailMode, setEmailMode] = useState<'signin' | 'signup'>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
+
+  React.useEffect(() => {
+    const hint = localStorage.getItem('realagents_provider_hint');
+    if (hint) {
+      setProviderHint(hint);
+      setUseEmail(false);
+      setError(`NOTICE: Your account is registered via ${hint === 'google' ? 'Google' : 'Facebook'}. Please log in using that provider.`);
+      localStorage.removeItem('realagents_provider_hint');
+    }
+  }, []);
 
   // Simple rate limiting
   const isRateLimited = () => {
@@ -47,6 +66,7 @@ export default function Login() {
       if (provider === 'facebook') await signInWithFacebook();
     } catch (err: any) {
       console.error(`${provider} sign-in error:`, err);
+      logAuthFailureToCrashlytics(err, `OAuth sign-in: ${provider}`);
       if (err.code === 'auth/popup-closed-by-user' || err.message?.includes('popup-closed-by-user')) {
         setError('Sign in cancelled. The authentication window was closed.');
       } else if (err.code === 'auth/cancelled-popup-request' || err.message?.includes('cancelled-popup-request')) {
@@ -70,24 +90,23 @@ export default function Login() {
       return;
     }
 
-    if (emailMode === 'signup' && !fullName) {
-      setError('Please enter your full name.');
-      return;
-    }
-
     setLoading('email');
     setError(null);
 
     try {
       if (emailMode === 'signin') {
-        await signInWithEmail(email, password);
+        await signInWithEmail(email, password, rememberMe);
       } else {
-        await signUpWithEmail(email, password, fullName);
+        setIsSigningUp(true);
       }
     } catch (err: any) {
       console.error('Email authentication error:', err);
+      logAuthFailureToCrashlytics(err, `Email login: ${emailMode}`);
       // Beautiful human errors
-      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+      if (err.code === 'auth/use-social-provider') {
+        setError('Use Google/Facebook to sign in');
+        setUseEmail(false);
+      } else if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
         setError('Invalid email or password. Please verify your credentials.');
       } else if (err.code === 'auth/email-already-in-use') {
         setError('The email address is already in use by another account.');
@@ -102,6 +121,30 @@ export default function Login() {
       setLoading(null);
     }
   };
+
+  if (isSigningUp) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-brand-gray dark:bg-[#0a0a0b] p-4 font-sans select-none">
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="max-w-md w-full bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-800 shadow-aggressive p-8"
+        >
+          <div className="flex flex-col items-center mb-6 text-center">
+            <div className="w-16 h-16 bg-brand-teal border-4 border-brand-black flex items-center justify-center mb-4 shadow-[4px_4px_0px_0px_#000]">
+              <Shield className="text-white" size={32} />
+            </div>
+            <h1 className="text-3xl font-black italic tracking-tighter text-brand-black dark:text-white uppercase transition-colors">
+              RealAgents<span className="text-brand-teal">.</span>
+            </h1>
+            <p className="text-zinc-500 dark:text-zinc-400 font-medium">New Workspace Registration</p>
+          </div>
+
+          <SignupFlow onCancel={() => setIsSigningUp(false)} />
+        </motion.div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-brand-gray dark:bg-[#0a0a0b] p-4 font-sans select-none">
@@ -152,7 +195,8 @@ export default function Login() {
               disabled={!!loading}
               className={cn(
                 "brutalist-button-white w-full py-4 flex items-center justify-center gap-3 font-bold",
-                loading === 'google' && "opacity-70 cursor-not-allowed"
+                loading === 'google' && "opacity-70 cursor-not-allowed",
+                providerHint === 'google' && "border-brand-teal dark:border-brand-teal ring-4 ring-brand-teal/50 animate-pulse"
               )}
             >
               {loading === 'google' ? <Loader2 className="animate-spin" /> : <Mail size={20} />}
@@ -164,7 +208,8 @@ export default function Login() {
               disabled={!!loading}
               className={cn(
                 "brutalist-button-white w-full py-4 flex items-center justify-center gap-3 font-bold border-brand-black",
-                loading === 'facebook' && "opacity-70 cursor-not-allowed"
+                loading === 'facebook' && "opacity-70 cursor-not-allowed",
+                providerHint === 'facebook' && "border-brand-teal dark:border-brand-teal ring-4 ring-brand-teal/50 animate-pulse"
               )}
             >
               {loading === 'facebook' ? <Loader2 className="animate-spin" /> : <Facebook size={20} />}
@@ -221,6 +266,21 @@ export default function Login() {
               </div>
             </div>
 
+            {emailMode === 'signin' && (
+              <div className="flex items-center gap-2 py-1">
+                <input
+                  type="checkbox"
+                  id="rememberMe"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="w-4 h-4 text-brand-teal border-2 border-brand-black focus:ring-0 focus:ring-offset-0 transition-all cursor-pointer accent-brand-black"
+                />
+                <label htmlFor="rememberMe" className="text-xs font-bold uppercase tracking-wide text-brand-black dark:text-zinc-300 select-none cursor-pointer">
+                  Remember Me on this device
+                </label>
+              </div>
+            )}
+
             <button
               type="submit"
               disabled={!!loading}
@@ -242,11 +302,11 @@ export default function Login() {
                 type="button"
                 className="text-xs font-extrabold text-brand-teal hover:underline uppercase tracking-wide cursor-pointer"
                 onClick={() => {
-                  setEmailMode(emailMode === 'signin' ? 'signup' : 'signin');
+                  setIsSigningUp(true);
                   setError(null);
                 }}
               >
-                {emailMode === 'signin' ? "Need a workspace account? Sign up" : "Already have a registered profile? Sign in"}
+                Need a workspace account? Sign up
               </button>
             </div>
           </form>
@@ -273,16 +333,24 @@ export default function Login() {
                   </p>
                   <div className="grid grid-cols-2 gap-2">
                     <button
+                      disabled={!!loading}
                       onClick={() => handleOAuthSignIn('google').catch(() => {})}
-                      className="bg-brand-black hover:bg-brand-teal dark:bg-zinc-800 text-white p-2 text-[10px] font-black border-2 border-brand-black hover:border-brand-teal uppercase tracking-widest text-center shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 transition-all cursor-pointer"
+                      className={cn(
+                        "bg-brand-black hover:bg-brand-teal dark:bg-zinc-800 text-white p-2 text-[10px] font-black border-2 border-brand-black hover:border-brand-teal uppercase tracking-widest text-center shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 transition-all cursor-pointer",
+                        !!loading && "opacity-50 cursor-not-allowed"
+                      )}
                     >
-                      MOCK GOOGLE
+                      {loading === 'google' ? 'WORKING...' : 'MOCK GOOGLE'}
                     </button>
                     <button
+                      disabled={!!loading}
                       onClick={() => handleOAuthSignIn('facebook').catch(() => {})}
-                      className="bg-brand-black hover:bg-brand-teal dark:bg-zinc-800 text-white p-2 text-[10px] font-black border-2 border-brand-black hover:border-brand-teal uppercase tracking-widest text-center shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 transition-all cursor-pointer"
+                      className={cn(
+                        "bg-brand-black hover:bg-brand-teal dark:bg-zinc-800 text-white p-2 text-[10px] font-black border-2 border-brand-black hover:border-brand-teal uppercase tracking-widest text-center shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 transition-all cursor-pointer",
+                        !!loading && "opacity-50 cursor-not-allowed"
+                      )}
                     >
-                      MOCK FACEBOOK
+                      {loading === 'facebook' ? 'WORKING...' : 'MOCK FACEBOOK'}
                     </button>
                   </div>
                 </div>

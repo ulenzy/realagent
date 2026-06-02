@@ -64,3 +64,22 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
+
+// Global Authentication Error Crashlytics simulation helper
+export function logAuthFailureToCrashlytics(error: any, contextStr: string) {
+  const errMsg = error instanceof Error ? error.message : String(error);
+  const errCode = error?.code || 'unknown';
+  console.error(`[Firebase Crashlytics Simulated] Authentication Failure! Context: ${contextStr}, Code: ${errCode}, Message: ${errMsg}`);
+  
+  // Save securely to firestore to allow administrators to monitor client problems
+  addDoc(collection(db, 'crashlytics_logs'), {
+    timestamp: Timestamp.now(),
+    type: 'auth_failure',
+    context: contextStr,
+    errorMessage: errMsg,
+    errorCode: errCode,
+    userAgent: typeof window !== 'undefined' ? window.navigator.userAgent : 'Server',
+  }).catch((err) => {
+    console.warn('Failed to commit log to simulate Crashlytics in Sandbox:', err);
+  });
+}

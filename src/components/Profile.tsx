@@ -76,6 +76,7 @@ export default function Profile({
   const {
     user,
     updateUser,
+    updateUserEmail,
     listingRequests,
     updateListingRequest,
     savedProperties,
@@ -329,11 +330,36 @@ export default function Profile({
     });
   };
 
+  const linkSocialAccount = async (providerName: 'google' | 'facebook') => {
+    if (!auth.currentUser) {
+      alert("No authenticated user found.");
+      return;
+    }
+    try {
+      const { linkWithPopup, GoogleAuthProvider, FacebookAuthProvider } = await import('firebase/auth');
+      const provider = providerName === 'google' 
+        ? new GoogleAuthProvider() 
+        : new FacebookAuthProvider();
+        
+      await linkWithPopup(auth.currentUser, provider);
+      
+      onUpdateUser({
+        [`linkedProviders_${providerName}`]: true
+      } as any);
+      
+      alert(`Successfully linked ${providerName === 'google' ? 'Google' : 'Facebook'} account!`);
+    } catch (err: any) {
+      console.error("Linking provider failed:", err);
+      alert(err.message || "Failed to link social provider.");
+    }
+  };
+
   // Profile Edit State
   const [profileEditData, setProfileEditData] = useState({
     name: user.name,
     firstName: user.firstName || "",
     lastName: user.lastName || "",
+    email: user.email || "",
     bio: user.bio || "",
     phoneNumber: user.phoneNumber || "",
     avatarSeed: user.avatarSeed || "User",
@@ -422,6 +448,25 @@ export default function Profile({
 
   // KYC State
   const [isPreviewing, setIsPreviewing] = useState(false);
+
+  useEffect(() => {
+    const currentView = isPreviewing ? "Public Profile Preview" : activeView;
+    window.dispatchEvent(new CustomEvent('profile-view-changed', { detail: { view: currentView } }));
+  }, [activeView, isPreviewing]);
+
+  useEffect(() => {
+    const handleProfileBack = (e: Event) => {
+      if (isPreviewing) {
+        e.preventDefault();
+        setIsPreviewing(false);
+      } else if (activeView !== 'main') {
+        e.preventDefault();
+        setActiveView('main');
+      }
+    };
+    window.addEventListener('profile-back-click', handleProfileBack);
+    return () => window.removeEventListener('profile-back-click', handleProfileBack);
+  }, [activeView, isPreviewing]);
   const [kycStage, setKycStage] = useState<1 | 2 | 3>(1);
   const [kycFiles, setKycFiles] = useState<string[]>([]);
   const [uploadedKycFiles, setUploadedKycFiles] = useState<
@@ -942,19 +987,15 @@ export default function Profile({
   if (isPreviewing) {
     return (
       <div className="relative">
-        <div className="sticky top-0 bg-white dark:bg-zinc-900 border-b-4 border-brand-black dark:border-zinc-700 p-4 flex items-center gap-4 z-[60] shadow-brutal-sm">
-          <button
-            onClick={() => setIsPreviewing(false)}
-            className="p-2 border-2 border-brand-black dark:border-zinc-700 hover:bg-brand-teal transition-colors text-brand-black dark:text-brand-gray"
-          >
-            <ArrowLeft size={20} />
-          </button>
-          <h1 className="text-xl font-display font-black uppercase tracking-tight text-brand-black dark:text-brand-gray">
-            Public Profile Preview
-          </h1>
-        </div>
         <div className="bg-zinc-50 dark:bg-brand-black min-h-screen">
-          <div className="p-4 border-b-2 border-dashed border-zinc-300 dark:border-zinc-800 text-center">
+          <div className="p-4 flex flex-wrap gap-4 justify-between items-center border-b-2 border-dashed border-zinc-300 dark:border-zinc-800">
+            <button
+              onClick={() => setIsPreviewing(false)}
+              className="flex items-center gap-1.5 p-2 bg-brand-teal text-brand-black border-2 border-brand-black dark:border-zinc-700 shadow-brutal-xs font-display font-black text-[10px] uppercase tracking-wider hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all cursor-pointer rounded-none"
+            >
+              <ArrowLeft size={16} />
+              <span>Exit Preview</span>
+            </button>
             <p className="text-[10px] font-black uppercase text-zinc-500 italic">
               This is how other users see your profile
             </p>
@@ -1075,19 +1116,16 @@ export default function Profile({
   if (activeView !== "main") {
     return (
       <div className="flex flex-col bg-brand-gray dark:bg-[#1c1c21] min-h-screen pb-32">
-        <div className="sticky top-0 bg-white dark:bg-zinc-900 border-b-4 border-brand-black dark:border-zinc-700 p-4 flex items-center gap-4 z-10 shadow-brutal-sm dark:shadow-[2px_2px_0px_0px_#52525b]">
-          <button
-            onClick={() => setActiveView("main")}
-            className="p-2 border-2 border-brand-black dark:border-zinc-700 hover:bg-brand-teal transition-colors text-brand-black dark:text-brand-gray"
-          >
-            <ArrowLeft size={20} />
-          </button>
-          <h1 className="text-xl font-display font-black uppercase tracking-tight text-brand-black dark:text-brand-gray">
-            {activeView}
-          </h1>
-        </div>
-
         <div className="p-4 flex flex-col gap-4">
+          <div className="mb-2">
+            <button
+              onClick={() => setActiveView("main")}
+              className="flex items-center gap-1.5 p-2 bg-brand-teal text-brand-black border-2 border-brand-black dark:border-zinc-700 shadow-brutal-xs font-display font-black text-[10px] uppercase tracking-wider hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all cursor-pointer rounded-none"
+            >
+              <ArrowLeft size={16} />
+              <span>Back to Workspace</span>
+            </button>
+          </div>
           {activeView === "Wallet" && (
             <div className="flex flex-col gap-6 relative">
               {purchaseSuccess && <ConfettiEffect />}
@@ -1389,6 +1427,23 @@ export default function Profile({
                           }
                           className="brutalist-input h-10 text-xs bg-[#dadcd8] dark:bg-zinc-800 border-zinc-700 text-brand-black dark:text-white w-full placeholder:text-zinc-500 dark:placeholder:text-zinc-400"
                           placeholder="+234 ..."
+                        />
+                      </div>
+                      <div className="group">
+                        <label className="text-[10px] font-black uppercase text-zinc-400 tracking-[0.2em] mb-1 block">
+                          Email Address
+                        </label>
+                        <input
+                          type="email"
+                          value={profileEditData.email}
+                          onChange={(e) =>
+                            setProfileEditData({
+                              ...profileEditData,
+                              email: e.target.value,
+                            })
+                          }
+                          className="brutalist-input h-10 text-xs bg-[#dadcd8] dark:bg-zinc-800 border-zinc-700 text-brand-black dark:text-white w-full placeholder:text-zinc-500 dark:placeholder:text-zinc-400"
+                          placeholder="your.email@workplace.com"
                         />
                       </div>
                       <div className="group">
@@ -2368,20 +2423,32 @@ export default function Profile({
                       !profileEditData.firstName ||
                       !profileEditData.lastName
                     }
-                    onClick={() => {
-                      onUpdateUser({
-                        ...profileEditData,
-                        avatarSeed: profileEditData.avatarSeed || avatarPreview,
-                        avatarUrl: getUserAvatarUrl(
-                          profileEditData,
-                          avatarPreview,
-                        ),
-                        profileScore: Math.min(
-                          100,
-                          (user.profileScore || 0) + 10,
-                        ),
-                      });
-                      setActiveView("main");
+                    onClick={async () => {
+                      try {
+                        let emailStatusMsg = "";
+                        if (profileEditData.email && profileEditData.email.trim().toLowerCase() !== user.email?.trim().toLowerCase()) {
+                          await updateUserEmail(profileEditData.email);
+                          emailStatusMsg = " Verification links have been dispatched to your new email address.";
+                        }
+                        
+                        onUpdateUser({
+                          ...profileEditData,
+                          avatarSeed: profileEditData.avatarSeed || avatarPreview,
+                          avatarUrl: getUserAvatarUrl(
+                            profileEditData,
+                            avatarPreview,
+                          ),
+                          profileScore: Math.min(
+                            100,
+                            (user.profileScore || 0) + 10,
+                          ),
+                        });
+                        alert(`Changes deployed successfully!${emailStatusMsg}`);
+                        setActiveView("main");
+                      } catch (err: any) {
+                        console.error("Save profile edits error:", err);
+                        alert(err.message || "Failed to update email or profile changes.");
+                      }
                     }}
                     className="brutalist-button-teal w-full py-4 text-xs font-black uppercase shadow-brutal-sm active:translate-y-1 active:shadow-none disabled:opacity-50 disabled:cursor-not-allowed"
                   >
@@ -2712,15 +2779,32 @@ export default function Profile({
                 </h4>
                 
                 {/* Linked accounts */}
-                <div className="flex justify-between items-center py-1 border-b border-dashed border-zinc-200 dark:border-zinc-800">
-                  <span className="text-xs font-bold uppercase tracking-tight text-neutral-600 dark:text-neutral-300">Linked Accounts</span>
-                  <span className="px-3 py-1 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded text-[10px] font-mono font-black text-zinc-500">
-                    {user.firstName === "Google" || user.email?.includes("gmail.com") 
-                      ? "Linked to Google" 
-                      : user.firstName === "Facebook" || user.email?.includes("facebook.com")
-                      ? "Linked to Facebook"
-                      : "Credential Email Setup"}
-                  </span>
+                <div className="flex flex-col gap-2 py-2 border-b border-dashed border-zinc-200 dark:border-zinc-800">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-bold uppercase tracking-tight text-neutral-600 dark:text-neutral-300">Linked Providers</span>
+                    <span className="px-3 py-1 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded text-[10px] font-mono font-black text-zinc-500 uppercase">
+                      {auth.currentUser?.providerData.map(p => p.providerId.replace('.com', '')).join(', ') || "Email Only"}
+                    </span>
+                  </div>
+                  
+                  <div className="flex gap-2 mt-1">
+                    {!(auth.currentUser?.providerData.some(p => p.providerId === 'google.com')) && (
+                      <button
+                        onClick={() => linkSocialAccount('google')}
+                        className="flex-1 bg-white hover:bg-neutral-100 text-brand-black dark:bg-zinc-800 dark:text-white border-2 border-brand-black px-2 py-1.5 font-display text-[9px] font-black uppercase tracking-widest transition-all shadow-brutal-xs active:translate-y-0.5"
+                      >
+                        🔗 LINK GOOGLE
+                      </button>
+                    )}
+                    {!(auth.currentUser?.providerData.some(p => p.providerId === 'facebook.com')) && (
+                      <button
+                        onClick={() => linkSocialAccount('facebook')}
+                        className="flex-1 bg-white hover:bg-neutral-100 text-brand-black dark:bg-zinc-800 dark:text-white border-2 border-brand-black px-2 py-1.5 font-display text-[9px] font-black uppercase tracking-widest transition-all shadow-brutal-xs active:translate-y-0.5"
+                      >
+                        🔗 LINK FACEBOOK
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {/* Active Sessions */}

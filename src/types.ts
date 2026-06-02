@@ -298,6 +298,8 @@ export interface UserPreferences {
 export interface User {
   id: string;
   name: string; // The unique display name
+  username?: string;
+  profileComplete?: boolean;
   firstName?: string;
   lastName?: string;
   email: string;
@@ -355,6 +357,7 @@ export interface User {
   preferences?: UserPreferences;
   profileVisible?: boolean;
   draftCount?: number;
+  profileVersion?: number;
 }
 
 export interface Dispute {

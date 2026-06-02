@@ -9,7 +9,15 @@ import {
   linkWithPopup,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
-  updateProfile
+  updateProfile,
+  fetchSignInMethodsForEmail,
+  setPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence,
+  linkWithCredential,
+  GoogleAuthProvider,
+  updateEmail,
+  sendEmailVerification
 } from 'firebase/auth';
 import { auth, googleProvider, facebookProvider } from '../lib/firebase';
 import { doc, getDoc, getDocs, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove, collection, query, where, addDoc, deleteDoc, Timestamp, runTransaction, increment, orderBy, limit, startAfter } from 'firebase/firestore';
@@ -29,7 +37,7 @@ interface AuthContextType {
   savedProperties: string[];
   signInWithGoogle: () => Promise<void>;
   signInWithFacebook: () => Promise<void>;
-  signInWithEmail: (email: string, pass: string) => Promise<void>;
+  signInWithEmail: (email: string, pass: string, rememberMe?: boolean) => Promise<void>;
   signUpWithEmail: (email: string, pass: string, name: string) => Promise<void>;
   signInWithGoogleMock: () => Promise<void>;
   signInWithFacebookMock: () => Promise<void>;
@@ -38,6 +46,7 @@ interface AuthContextType {
   addListingRequest: (request: ListingRequest) => Promise<void>;
   updateListingRequest: (id: string, updates: Partial<ListingRequest>) => Promise<void>;
   updateUser: (updates: Partial<User>) => Promise<void>;
+  updateUserEmail: (newEmail: string) => Promise<void>;
   addTransaction: (transaction: Transaction) => Promise<void>;
   updateAgentTrustScore: (agentId: string, event: TrustScoreEvent) => Promise<void>;
   drafts: ListingRequest[];
@@ -104,6 +113,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setFirebaseUser(fUser);
       setError(null);
       if (fUser) {
+        // Fast-path client-side optimization to retrieve profile details instantly and prevent duplicate Firestore initial reads
+        const cachedComplete = localStorage.getItem(`realagents_profile_completed_${fUser.uid}`) === 'true';
+        if (cachedComplete) {
+          const cachedUserStr = localStorage.getItem(`realagents_user_profile_${fUser.uid}`);
+          if (cachedUserStr) {
+            try {
+              const cachedUser = JSON.parse(cachedUserStr);
+              setUser(cachedUser);
+              setSavedProperties(cachedUser.savedProperties || []);
+              setLoading(false);
+            } catch (e) {
+              console.warn("Error parsing user cache payload:", e);
+            }
+          }
+        }
+
         // Listen to User Profile
         const userDocRef = doc(db, 'users', fUser.uid);
         unsubscribeUserRef.current = onSnapshot(userDocRef, (docSnap) => {
@@ -111,6 +136,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const userData = docSnap.data() as User;
             setUser(userData);
             setSavedProperties(userData.savedProperties || []);
+
+            // Secure user-level localStorage cache payload
+            if (userData.onboardingCompleted || userData.profileComplete) {
+              localStorage.setItem(`realagents_profile_completed_${fUser.uid}`, 'true');
+              localStorage.setItem(`realagents_user_profile_${fUser.uid}`, JSON.stringify(userData));
+            }
 
             if (userData.accountStatus === 'Suspended' || userData.accountStatus === 'Banned') {
               setTimeout(() => {
@@ -221,6 +252,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               phoneVerified: false,
               preferences: DEFAULT_PREFERENCES,
               profileVisible: true,
+              profileVersion: 1,
             } as any;
             setDoc(userDocRef, newUser);
           }
@@ -257,8 +289,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
+  const applyPersistence = async (rememberMe?: boolean) => {
+    const isRemembered = rememberMe !== undefined ? rememberMe : (localStorage.getItem('realagents_remember_me') !== 'false');
+    const persistence = isRemembered ? browserLocalPersistence : browserSessionPersistence;
+    await setPersistence(auth, persistence);
+    localStorage.setItem('realagents_remember_me', isRemembered ? 'true' : 'false');
+  };
+
   const signInWithGoogle = async () => {
     try {
+      await applyPersistence();
       await signInWithPopup(auth, googleProvider);
     } catch (error: any) {
       if (
@@ -302,6 +342,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         phoneVerified: false,
         preferences: DEFAULT_PREFERENCES,
         profileVisible: true,
+        profileVersion: 1,
       } as any;
       await setDoc(userDocRef, newUser);
     } catch (err: any) {
@@ -312,6 +353,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signInWithFacebook = async () => {
     try {
+      await applyPersistence();
       await signInWithPopup(auth, facebookProvider);
     } catch (error: any) {
       if (
@@ -355,6 +397,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         phoneVerified: false,
         preferences: DEFAULT_PREFERENCES,
         profileVisible: true,
+        profileVersion: 1,
       } as any;
       await setDoc(userDocRef, newUser);
     } catch (err: any) {
@@ -363,8 +406,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const signInWithEmail = async (email: string, pass: string) => {
+  const signInWithEmail = async (email: string, pass: string, rememberMe: boolean = true) => {
     try {
+      // 1. Check if account exists and which providers are linked
+      try {
+        const methods = await fetchSignInMethodsForEmail(auth, email);
+        if (methods.length > 0 && !methods.includes('password')) {
+          if (methods.includes('google.com') || methods.includes('facebook.com')) {
+            const error = new Error('Use Google/Facebook to sign in');
+            (error as any).code = 'auth/use-social-provider';
+            throw error;
+          }
+        }
+      } catch (checkErr: any) {
+        if (checkErr.code === 'auth/use-social-provider') {
+          throw checkErr;
+        }
+        console.warn('SignIn check failed, proceeding directly to auth:', checkErr);
+      }
+
+      // 2. Set Persistence based on Remember Me toggle
+      await applyPersistence(rememberMe);
+
+      // 3. Authenticate with Password
       await signInWithEmailAndPassword(auth, email, pass);
     } catch (err) {
       console.error('Email sign in error:', err);
@@ -374,6 +438,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signUpWithEmail = async (email: string, pass: string, name: string) => {
     try {
+      await applyPersistence(true); // default to remember on signup
       const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
       const fUser = userCredential.user;
       await updateProfile(fUser, { displayName: name });
@@ -401,6 +466,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         phoneVerified: false,
         preferences: DEFAULT_PREFERENCES,
         profileVisible: true,
+        profileVersion: 1,
       } as any;
       
       await setDoc(doc(db, 'users', fUser.uid), newUser);
@@ -412,6 +478,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   async function logout() {
     try {
+      const currentUid = auth.currentUser?.uid;
+      if (currentUid) {
+        localStorage.removeItem(`realagents_profile_completed_${currentUid}`);
+        localStorage.removeItem(`realagents_user_profile_${currentUid}`);
+      }
+      localStorage.removeItem('realagents_remember_me');
+      localStorage.removeItem('realagents_profile_version');
+      localStorage.removeItem('realagents_onboarding_completed');
+      localStorage.removeItem('realagents_last_profile_check');
       await signOut(auth);
     } catch (error) {
       console.error('Logout Error:', error);
@@ -831,11 +906,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const updateUserEmail = async (newEmail: string) => {
+    if (!auth.currentUser || !user) throw new Error("No authenticated user found.");
+    try {
+      await updateEmail(auth.currentUser, newEmail);
+      await sendEmailVerification(auth.currentUser);
+      await updateDoc(doc(db, 'users', auth.currentUser.uid), {
+        email: newEmail.trim().toLowerCase(),
+        lastUpdated: new Date().toISOString()
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${auth.currentUser.uid}`);
+      throw error;
+    }
+  };
+
   return (
     <AuthContext.Provider value={{ 
       user, firebaseUser, loading, error, listingRequests, platformListings, savedProperties,
       signInWithGoogle, signInWithFacebook, signInWithEmail, signUpWithEmail, signInWithGoogleMock, signInWithFacebookMock, logout,
-      toggleSavedProperty, addListingRequest, updateListingRequest, updateUser, addTransaction, updateAgentTrustScore,
+      toggleSavedProperty, addListingRequest, updateListingRequest, updateUser, updateUserEmail, addTransaction, updateAgentTrustScore,
       drafts, saveDraft, updateDraft, deleteDraft, promoteDraftToListing,
       loadMorePlatformListings, loadMoreListingRequests
     }}>

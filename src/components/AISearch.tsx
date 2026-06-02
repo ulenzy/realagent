@@ -4,10 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 import { mockProperties } from '../data/mockListings';
 import { ROILevel, Property } from '../types';
-import { GoogleGenAI } from "@google/genai";
-
-// Initialize Gemini
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+import { auth } from '../lib/firebase';
 
 interface Message {
   id: string;
@@ -52,34 +49,30 @@ export default function AISearch() {
     setIsLoading(true);
 
     try {
-      const prompt = `
-        You are an expert Nigerian Real Estate Investment Analyst named RealAI.
-        User Query: "${input}"
-        
-        Available Property Data: ${JSON.stringify(mockProperties)}
-        
-        Task:
-        1. Analyze user intent (flip/rent/live).
-        2. Filter matching properties from data.
-        3. Assign a Location Development Score (0-100).
-        4. Provide reasoning text for ROI.
-        
-        Response Format (JSON):
-        {
-          "answer": "Concise natural language summary of why you chose these properties and market trends.",
-          "recommendedIds": ["1", "3"],
-          "intent": "flip",
-          "budget": "numbers only",
-          "marketHighlight": "Latest infra news in that area"
-        }
-      `;
+      // Fetch the current Firebase ID Token of the authenticated user
+      const currentUser = auth.currentUser;
+      const idToken = currentUser ? await currentUser.getIdToken(true) : '';
 
-      const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash-exp",
-        contents: prompt
+      // Secure client call proxying requests directly to server
+      const res = await fetch('/api/ai-search', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`
+        },
+        body: JSON.stringify({
+          input,
+          mockProperties
+        })
       });
-      
-      const responseText = response.text || '';
+
+      if (!res.ok) {
+        const errResp = await res.json().catch(() => ({}));
+        throw new Error(errResp.error || `HTTP ${res.status}`);
+      }
+
+      const responseData = await res.json();
+      const responseText = responseData.text || '';
       
       // Try to parse JSON from response
       let parsedData;
@@ -100,11 +93,15 @@ export default function AISearch() {
       };
 
       setMessages(prev => [...prev, aiMessage]);
-    } catch (error) {
+    } catch (error: any) {
+      console.error("AI Search proxy error:", error);
+      const isRateLimit = error?.message?.includes('429');
       setMessages(prev => [...prev, {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: "I'm having trouble accessing real-time market data right now. However, looking at my local cache, areas like Ibeju-Lekki and Lugbe are currently seeing high infrastructure growth signals."
+        content: isRateLimit 
+          ? "You have reached your search query limit. Please wait a minute and try again."
+          : "I'm having trouble accessing real-time market data right now. However, looking at my local cache, areas like Ibeju-Lekki and Lugbe are currently seeing high infrastructure growth signals."
       }]);
     } finally {
       setIsLoading(false);

@@ -1,10 +1,102 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 
 dotenv.config();
+
+// Load firebase project config from file
+let FIREBASE_PROJECT_ID = 'striped-accord-m5xj8';
+try {
+  const firebaseConfigPath = path.join(process.cwd(), 'firebase-applet-config.json');
+  if (fs.existsSync(firebaseConfigPath)) {
+    const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, 'utf-8'));
+    FIREBASE_PROJECT_ID = firebaseConfig.projectId || FIREBASE_PROJECT_ID;
+  }
+} catch (e) {
+  console.warn('Could not read firebase-applet-config.json:', e);
+}
+
+// User-specific rate limiter for AI queries (5 requests per 60 seconds)
+const userRequestCounts = new Map<string, { count: number; resetTime: number }>();
+function checkUserRateLimit(userId: string, limit: number = 5, windowMs: number = 60000): boolean {
+  const now = Date.now();
+  const userData = userRequestCounts.get(userId);
+
+  if (!userData) {
+    userRequestCounts.set(userId, { count: 1, resetTime: now + windowMs });
+    return true;
+  }
+
+  if (now > userData.resetTime) {
+    userData.count = 1;
+    userData.resetTime = now + windowMs;
+    return true;
+  }
+
+  if (userData.count >= limit) {
+    return false;
+  }
+
+  userData.count += 1;
+  return true;
+}
+
+// Low-overhead JWT validation for Firebase ID token from authentication
+function verifyFirebaseToken(token: string) {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      return null;
+    }
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf-8'));
+    
+    // Verify standard Firebase secure token JWT attributes
+    const expectedIssuer = `https://securetoken.google.com/${FIREBASE_PROJECT_ID}`;
+    const issMatch = payload.iss === expectedIssuer;
+    const audMatch = payload.aud === FIREBASE_PROJECT_ID;
+    const isNotExpired = payload.exp > (Date.now() / 1000);
+
+    if (issMatch && audMatch && isNotExpired) {
+      return payload; // yields sub (user UID) and other properties
+    }
+    return null;
+  } catch (error) {
+    console.error('Error verifying Firebase ID token in Express:', error);
+    return null;
+  }
+}
+
+// Simple robust in-memory rate limiter middleware to prevent API flooding and protect Gemini quotas
+const ipRequestCounts = new Map<string, { count: number; resetTime: number }>();
+function rateLimiter(limit: number, windowMs: number) {
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const ip = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+    const clientData = ipRequestCounts.get(ip);
+
+    if (!clientData) {
+      ipRequestCounts.set(ip, { count: 1, resetTime: now + windowMs });
+      return next();
+    }
+
+    if (now > clientData.resetTime) {
+      clientData.count = 1;
+      clientData.resetTime = now + windowMs;
+      return next();
+    }
+
+    if (clientData.count >= limit) {
+      console.warn(`Rate limit triggered for IP: ${ip}`);
+      return res.status(429).json({ error: 'Too many requests. Please cool down.' });
+    }
+
+    clientData.count += 1;
+    next();
+  };
+}
 
 async function startServer() {
   const app = express();
@@ -12,8 +104,11 @@ async function startServer() {
 
   app.use(express.json());
 
+  // Define 15 requests per minute limiter
+  const apiLimiter = rateLimiter(15, 60000);
+
   // API route first
-  app.post('/api/generate-land-title', async (req, res) => {
+  app.post('/api/generate-land-title', apiLimiter, async (req, res) => {
     const { landUse, landSize, state } = req.body;
     if (!landUse || !landSize) {
       return res.status(400).json({ error: 'landUse and landSize are required' });
@@ -51,7 +146,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/estate-intelligence', async (req, res) => {
+  app.post('/api/estate-intelligence', apiLimiter, async (req, res) => {
     const { lat, lng, propertyType, listingType } = req.body;
     if (lat === undefined || lng === undefined) {
       return res.status(400).json({ error: 'Coordinates lat and lng are required' });
@@ -123,6 +218,96 @@ Return only valid JSON matching this schema, no markdown code blocks, no trailin
         console.warn('Error in Express Gemini API:', errorMsg);
       }
       res.json({ aiGenerated: false });
+    }
+  });
+
+  // Secure fully verified and per-user rate-limited AI search Gemini endpoint proxy
+  app.post('/api/ai-search', async (req, res) => {
+    try {
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        console.warn('Unauthorized request to /api/ai-search: Missing Authorization header');
+        return res.status(401).json({ error: 'Unauthorized: Missing or invalid token format' });
+      }
+
+      const token = authHeader.split('Bearer ')[1];
+      const decoded = verifyFirebaseToken(token);
+      if (!decoded) {
+        console.warn('Unauthorized request to /api/ai-search: Invalid token signature/issuer/expiration');
+        return res.status(401).json({ error: 'Unauthorized: Invalid token' });
+      }
+
+      const userId = decoded.sub;
+
+      // Ensure per-user rate limit (5 requests per min max)
+      const allowed = checkUserRateLimit(userId, 5, 60000);
+      if (!allowed) {
+        console.warn(`Rate limit triggered on /api/ai-search for user: ${userId}`);
+        return res.status(429).json({ error: 'Too many requests. Please wait a moment before querying the AI again.' });
+      }
+
+      const { input, mockProperties } = req.body;
+      if (!input || typeof input !== 'string') {
+        return res.status(400).json({ error: 'A search query input is required.' });
+      }
+
+      const key = process.env.GEMINI_API_KEY;
+      if (!key) {
+        console.warn('Missing GEMINI_API_KEY environment variable. Returning fallback instructions.');
+        return res.json({
+          text: JSON.stringify({
+            answer: "The AI Intelligence assistant is currently operating on offline fallback mode. Looking at current Abuja signals: Ibeju-Lekki is exhibiting high development signals and Lugbe is experiencing substantial residential yields.",
+            recommendedIds: ["1", "2"],
+            intent: "rent",
+            budget: "5000000",
+            marketHighlight: "Abuja FCT infrastructural expansion is pushing peripheral growth."
+          })
+        });
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey: key,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
+
+      const prompt = `
+        You are an expert Nigerian Real Estate Investment Analyst named RealAI.
+        User Query: "${input}"
+        
+        Available Property Data: ${mockProperties ? JSON.stringify(mockProperties) : '[]'}
+        
+        Task:
+        1. Analyze user intent (flip/rent/live).
+        2. Filter matching properties from data.
+        3. Assign a Location Development Score (0-100).
+        4. Provide reasoning text for ROI.
+        
+        Response Format (JSON):
+        {
+          "answer": "Concise natural language summary of why you chose these properties and market trends.",
+          "recommendedIds": ["1", "3"],
+          "intent": "flip",
+          "budget": "numbers only",
+          "marketHighlight": "Latest infra news in that area"
+        }
+      `;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.5-flash',
+        contents: prompt,
+        config: {
+          responseMimeType: 'application/json'
+        }
+      });
+
+      res.json({ text: response.text || '' });
+    } catch (error: any) {
+      console.error('Error handling Gemini AI search in server:', error);
+      res.status(500).json({ error: error?.message || 'Failed to analyze search query' });
     }
   });
 

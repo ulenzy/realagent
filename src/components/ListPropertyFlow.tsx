@@ -117,18 +117,6 @@ export default function ListPropertyFlow() {
 
     return (
       <div className="min-h-screen bg-brand-gray dark:bg-[#1c1c21] p-6">
-        <div className="flex items-center gap-4 p-6 border-b-4 border-brand-black dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-brutal-sm mb-12">
-          <button 
-            onClick={onBack}
-            className="p-2 border-2 border-brand-black dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-brutal-xs hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all"
-          >
-            <ArrowLeft size={24} />
-          </button>
-          <h1 className="text-2xl font-display font-black italic uppercase tracking-tighter">
-            Verification <span className="text-brand-teal">Required</span>
-          </h1>
-        </div>
-
         <div className="max-w-2xl mx-auto bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 p-8 shadow-brutal-md">
           <div className="text-center mb-8">
             <span className="bg-amber-100 border-2 border-brand-black dark:border-zinc-700 text-amber-700 px-3 py-1 text-[10px] font-black uppercase tracking-wider shadow-brutal-xs inline-block mb-3">
@@ -257,18 +245,6 @@ export default function ListPropertyFlow() {
 
     return (
       <div className="min-h-screen bg-brand-gray dark:bg-[#1c1c21] p-6">
-        <div className="flex items-center gap-4 p-6 border-b-4 border-brand-black dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-brutal-sm mb-12">
-          <button 
-            onClick={onBack}
-            className="p-2 border-2 border-brand-black dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-brutal-xs hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all"
-          >
-            <ArrowLeft size={24} />
-          </button>
-          <h1 className="text-2xl font-display font-black italic uppercase tracking-tighter">
-            Listing <span className="text-brand-teal">Coverage</span>
-          </h1>
-        </div>
-
         <div className="max-w-2xl mx-auto bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 p-8 shadow-brutal-md">
           <div className="text-center mb-8">
             <span className="bg-emerald-100 border-2 border-brand-black dark:border-zinc-700 text-emerald-700 px-3 py-1 text-[10px] font-black uppercase tracking-wider shadow-brutal-xs inline-block mb-3">
@@ -661,16 +637,6 @@ export default function ListPropertyFlow() {
 
   return (
     <div className="min-h-screen bg-brand-gray dark:bg-[#1c1c21] p-6 animate-fadeIn">
-      <div className="flex items-center gap-4 bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 shadow-brutal-sm p-6 mb-8">
-        <button 
-          onClick={onBack}
-          className="p-2 border-2 border-brand-black dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-brutal-xs hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all"
-        >
-          <ArrowLeft size={24} />
-        </button>
-        <span className="text-2xl font-display font-black italic uppercase tracking-tighter">RealAgents</span>
-      </div>
-
       <div className="max-w-2xl mx-auto">
         <h1 className="text-4xl font-display font-black uppercase tracking-tighter mb-8 dark:text-white">WHAT ARE YOU LISTING?</h1>
 
