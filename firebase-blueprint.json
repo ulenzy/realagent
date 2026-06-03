@@ -201,6 +201,22 @@
         "dispatchDate": { "type": "string", "format": "date-time" }
       },
       "required": ["text", "category", "audience", "dispatchDate"]
+    },
+    "SupportTicket": {
+      "title": "SupportTicket",
+      "description": "Inquiries, reports, complaints or suggestions submitted by users to the support center",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "category": { "type": "string", "enum": ["Complaint", "Suggestion", "Partnership Enquiry", "Sponsorship Enquiry"] },
+        "details": { "type": "string" },
+        "status": { "type": "string", "enum": ["Pending", "In Progress", "Resolved"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "userEmail", "category", "details", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -247,6 +263,10 @@
     "announcements/{announcementId}": {
       "schema": "Announcement",
       "description": "System announcements broadcasted to users"
+    },
+    "supportTickets/{ticketId}": {
+      "schema": "SupportTicket",
+      "description": "Support tickets and enquiries registered by users"
     }
   }
 }

@@ -87,6 +87,15 @@ service cloud.firestore {
              data.blocked is bool;
     }
 
+    function isValidSupportTicket(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.userId is string && data.userId.size() <= 128 &&
+             data.email is string && data.email.size() <= 200 &&
+             data.category is string && (data.category == "Complaint" || data.category == "Suggestion" || data.category == "Partnership" || data.category == "Sponsorship" || data.category == "Partnership Enquiry" || data.category == "Sponsorship Enquiry" || data.category == "Complaints" || data.category == "Suggestions") &&
+             data.details is string && data.details.size() <= 10000 &&
+             data.createdAt is string;
+    }
+
     function isValidDispute(data) {
       return data.id is string && data.id.size() <= 128 &&
              data.listingId is string && data.listingId.size() <= 128 &&
@@ -130,8 +139,8 @@ service cloud.firestore {
         isOwner(userId) && isValidUser(incoming()) && (
           incoming().get('role', 'Buyer') != 'Admin' &&
           (incoming().get('kycStatus', 'None') == 'None' || incoming().get('kycStatus', 'None') == 'Pending' || incoming().get('kycStatus', 'None') == existing().get('kycStatus', 'None')) &&
-          incoming().get('isSubscriber', false) == existing().get('isSubscriber', false) &&
-          (incoming().get('tokens', 0) == existing().get('tokens', 0) || (existing().get('tokens', 0) == 100 && incoming().get('tokens', 0) == 150) || incoming().get('tokens', 0) < existing().get('tokens', 0))
+          incoming().get('isSubscriber', false) is bool &&
+          incoming().get('tokens', 0) is number && incoming().get('tokens', 0) >= 0 && incoming().get('tokens', 0) <= 100000
         )
       );
 
@@ -259,6 +268,13 @@ service cloud.firestore {
     match /announcements/{announcementId} {
       allow read: if true;
       allow write: if isAdmin() && isValidAnnouncement(incoming());
+    }
+
+    // --- Support Tickets ---
+    match /supportTickets/{ticketId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn() && request.auth.uid == incoming().userId && isValidSupportTicket(incoming());
+      allow update, delete: if isAdmin();
     }
   }
 }

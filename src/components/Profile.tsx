@@ -56,7 +56,7 @@ import { useNavigation } from "../context/NavigationContext";
 import { getUserAvatarUrl } from "../lib/avatar";
 import { AVATAR_COSMETICS, FRAME_COSMETICS, TITLE_COSMETICS } from "../constants/cosmetics";
 import { Crown, Flame, ShoppingBag, Tag } from "lucide-react";
-import { collection, query, where, getDocs, doc, updateDoc } from "firebase/firestore";
+import { collection, query, where, getDocs, doc, updateDoc, setDoc } from "firebase/firestore";
 import { RecaptchaVerifier, signInWithPhoneNumber } from "firebase/auth";
 import { auth, db } from "../lib/firebase";
 
@@ -108,6 +108,7 @@ export default function Profile({
     | "Admin Panel"
     | "Preferences"
     | "Account Settings"
+    | "Support Center"
   >(initialView);
 
   useEffect(() => {
@@ -131,6 +132,44 @@ export default function Profile({
   const [activeSessionsAlert, setActiveSessionsAlert] = useState<string | null>(null);
 
   const [feedbackNotice, setFeedbackNotice] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  // Support Center state variables
+  const [supportCategory, setSupportCategory] = useState<string>("Complaint");
+  const [supportDetails, setSupportDetails] = useState<string>("");
+  const [submittingSupport, setSubmittingSupport] = useState<boolean>(false);
+  const [userTickets, setUserTickets] = useState<any[]>([]);
+  const [loadingTickets, setLoadingTickets] = useState<boolean>(false);
+
+  const fetchUserTickets = async () => {
+    if (!user?.id) return;
+    setLoadingTickets(true);
+    try {
+      const ticketsRef = collection(db, "supportTickets");
+      const q = query(ticketsRef, where("userId", "==", user.id));
+      const querySnapshot = await getDocs(q);
+      const ticketsList = querySnapshot.docs.map(gdoc => ({
+        id: gdoc.id,
+        ...gdoc.data()
+      }));
+      // Sort client-side by createdAt descending
+      ticketsList.sort((a: any, b: any) => {
+        const dateA = new Date(a.createdAt || 0).getTime();
+        const dateB = new Date(b.createdAt || 0).getTime();
+        return dateB - dateA;
+      });
+      setUserTickets(ticketsList);
+    } catch (err: any) {
+      console.error("Error fetching support tickets:", err);
+    } finally {
+      setLoadingTickets(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeView === "Support Center") {
+      fetchUserTickets();
+    }
+  }, [activeView, user?.id]);
 
   // Local helper to shadow native browser alert dialogue boxes inside restricted iframes
   const alert = (message: string) => {
@@ -914,6 +953,7 @@ export default function Profile({
         "Wallet",
         "Preferences",
         "Account Settings",
+        "Support Center",
       ].includes(action)
     ) {
       setActiveView(action as any);
@@ -3047,6 +3087,155 @@ export default function Profile({
               </div>
             </div>
           )}
+          {activeView === "Support Center" && (
+            <div className="flex flex-col gap-6">
+              {/* Header Card */}
+              <div className="bg-brand-black text-white p-6 border-4 border-brand-teal shadow-aggressive relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-4 opacity-10">
+                  <HelpCircle size={100} className="text-brand-teal fill-brand-teal" />
+                </div>
+                <h3 className="text-2xl font-display font-black italic uppercase text-brand-teal mb-1">
+                  Support Command Center
+                </h3>
+                <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                  Complaints, Suggestions, Partnership & Sponsorship Pipelines
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+                {/* Form Card */}
+                <div className="bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 p-6 shadow-brutal-sm flex flex-col gap-4">
+                  <h4 className="text-xs font-black uppercase tracking-wider text-zinc-500 flex items-center gap-1.5 border-l-4 border-brand-teal pl-2">
+                    <MessageSquare size={12} /> Lodge a Ticket or Report
+                  </h4>
+                  <form onSubmit={async (e) => {
+                    e.preventDefault();
+                    if (!supportDetails.trim()) {
+                      alert("Please fill in detailed information before submitting!");
+                      return;
+                    }
+                    setSubmittingSupport(true);
+                    const ticketId = `ticket-${Date.now()}`;
+                    const newTicket = {
+                      id: ticketId,
+                      userId: user.id,
+                      email: user.email || auth.currentUser?.email || "",
+                      category: supportCategory,
+                      details: supportDetails,
+                      status: "Pending",
+                      createdAt: new Date().toISOString()
+                    };
+                    try {
+                      await setDoc(doc(db, "supportTickets", ticketId), newTicket);
+                      alert("Your support request has been logged and received!");
+                      setSupportDetails("");
+                      fetchUserTickets();
+                    } catch (err: any) {
+                      console.error("Error submitting support:", err);
+                      alert(`Failed to log support ticket: ${err.message || err}`);
+                    } finally {
+                      setSubmittingSupport(false);
+                    }
+                  }} className="flex flex-col gap-4 text-left">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-black uppercase tracking-wider text-zinc-500">
+                        Category Type
+                      </label>
+                      <select
+                        value={supportCategory}
+                        onChange={(e) => setSupportCategory(e.target.value)}
+                        className="brutalist-input h-10 text-xs w-full bg-[#dadcd8] dark:bg-zinc-850 border-2 border-brand-black dark:border-zinc-700 text-brand-black dark:text-white"
+                      >
+                        <option value="Complaint">Complaint / Report</option>
+                        <option value="Suggestion">Suggestion / Idea</option>
+                        <option value="Partnership Enquiry">Partnership Enquiry</option>
+                        <option value="Sponsorship Enquiry">Sponsorship Enquiry</option>
+                      </select>
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-black uppercase tracking-wider text-zinc-500">
+                        Detailed Description
+                      </label>
+                      <textarea
+                        value={supportDetails}
+                        onChange={(e) => setSupportDetails(e.target.value)}
+                        className="brutalist-input min-h-[140px] py-3 text-xs bg-[#dadcd8] dark:bg-zinc-850 border-2 border-brand-black dark:border-zinc-700 text-brand-black dark:text-white leading-relaxed resize-none w-full placeholder:text-zinc-500 dark:placeholder:text-zinc-400"
+                        placeholder="Provide deep, clear specifics of your complaint, suggestion, partnership proposal or sponsorship parameters, and we will follow up shortly..."
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={submittingSupport}
+                      className="w-full bg-brand-teal hover:bg-teal-400 text-brand-black py-3 border-2 border-brand-black font-display font-black uppercase tracking-wider text-xs shadow-brutal-xs transition-all active:translate-y-0.5 disabled:opacity-50 disabled:translate-y-0"
+                    >
+                      {submittingSupport ? "TRANSMITTING TO CORE..." : "SUBMIT FORM INQUIRY"}
+                    </button>
+                  </form>
+                </div>
+
+                {/* Tickets History Card */}
+                <div className="bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 p-6 shadow-brutal-sm flex flex-col gap-4 min-h-[350px]">
+                  <h4 className="text-xs font-black uppercase tracking-wider text-zinc-500 flex items-center gap-1.5 border-l-4 border-brand-teal pl-2 mb-2">
+                    <Clock size={12} /> Filed Inquiry Audits
+                  </h4>
+
+                  {loadingTickets ? (
+                    <div className="flex-1 flex items-center justify-center py-12">
+                      <div className="text-xs font-black uppercase tracking-widest text-zinc-500 animate-pulse">
+                        Querying records...
+                      </div>
+                    </div>
+                  ) : userTickets.length === 0 ? (
+                    <div className="flex-1 flex flex-col items-center justify-center py-12 text-center">
+                      <HelpCircle size={32} className="text-zinc-400 mb-2 animate-pulse" />
+                      <p className="text-[11px] font-black uppercase tracking-tight text-zinc-500 max-w-[280px]">
+                        No active support tickets logged. Submit an inquiry form to get started.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4 max-h-[450px] overflow-y-auto pr-1">
+                      {userTickets.map((ticket) => (
+                        <div
+                          key={ticket.id}
+                          className="p-4 bg-zinc-50 dark:bg-zinc-800/40 border-2 border-brand-black dark:border-zinc-750 flex flex-col gap-3 text-left shadow-brutal-xs"
+                        >
+                          <div className="flex justify-between items-start gap-2 border-b border-dashed border-zinc-200 dark:border-zinc-700 pb-2">
+                            <div className="flex flex-col">
+                              <span className="text-[9px] font-black uppercase bg-brand-teal/20 text-brand-teal border border-brand-teal/30 px-1.5 py-0.5 max-w-max">
+                                {ticket.category}
+                              </span>
+                              <span className="text-[8px] font-mono font-bold text-zinc-400 mt-1">
+                                {ticket.id}
+                              </span>
+                            </div>
+                            <span className={cn(
+                              "text-[8px] font-black uppercase px-2 py-0.5 border-2 border-brand-black",
+                              ticket.status === "Pending" ? "bg-amber-400 text-black shadow-[2px_2px_0px_rgba(0,0,0,1)]" :
+                              ticket.status === "In Progress" ? "bg-brand-teal text-brand-black shadow-[2px_2px_0px_rgba(0,0,0,1)]" :
+                              "bg-emerald-500 text-white shadow-[2px_2px_0px_rgba(0,0,0,1)]"
+                            )}>
+                              {ticket.status || "Pending"}
+                            </span>
+                          </div>
+
+                          <p className="text-xs font-mono text-[#0e0e0e] dark:text-zinc-100 font-medium whitespace-pre-wrap leading-relaxed break-words">
+                            {ticket.details}
+                          </p>
+
+                          <div className="flex justify-between items-center text-[8px] font-mono text-zinc-450 mt-1">
+                            <span>Logged By: {ticket.email || "User"}</span>
+                            <span>{new Date(ticket.createdAt).toLocaleString()}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -3599,7 +3788,26 @@ export default function Profile({
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                onUpdateUser({ isSubscriber: !isSubscriber });
+                const willBeSubscriber = !isSubscriber;
+                if (willBeSubscriber) {
+                  onUpdateUser({ 
+                    isSubscriber: true,
+                    tokens: (user.tokens || 0) + 450
+                  });
+                  if (addTransaction) {
+                    addTransaction({
+                      id: `tx-${Date.now()}`,
+                      type: 'Credit',
+                      amount: 450,
+                      description: 'Pro Subscription Reward Tokens',
+                      timestamp: new Date().toISOString()
+                    });
+                  }
+                  alert("Upgraded to Pro! 450 subscription bonus tokens have been added to your wallet.");
+                } else {
+                  onUpdateUser({ isSubscriber: false });
+                  alert("Your Pro subscription has been cancelled.");
+                }
               }}
               className={cn(
                 "w-10 h-5 rounded-full p-0.5 transition-all border-2 border-brand-black flex items-center shadow-brutal-xs active:translate-y-0.5",
