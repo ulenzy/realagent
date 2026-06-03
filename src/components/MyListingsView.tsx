@@ -11,6 +11,7 @@ import {
   Edit3,
   BarChart3,
   Power,
+  Trash2,
   Calendar,
   Zap,
   AlertTriangle,
@@ -21,7 +22,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { useAuth } from "../context/AuthContext";
 import { useNavigation } from "../context/NavigationContext";
 import { ListingStatus, ListingRequest } from "../types";
-import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from "../lib/firebase";
 import { sendNotification } from "../lib/notifications";
 import {
@@ -124,6 +125,7 @@ export default function MyListingsView() {
   const {
     user,
     updateUser,
+    updateTokens,
     listingRequests = [],
     updateListingRequest,
     addTransaction,
@@ -193,7 +195,7 @@ export default function MyListingsView() {
         return;
       }
       try {
-        await updateUser({ tokens: user.tokens - 200 });
+        await updateTokens(-200);
         if (addTransaction) {
           await addTransaction({
             id: `tx-${Date.now()}`,
@@ -254,7 +256,7 @@ export default function MyListingsView() {
   const MAX_PRO_BOOSTS = 3;
   const BOOST_COST = 20;
 
-  const handleSpendTokens = (amount: number, description: string) => {
+  const handleSpendTokens = async (amount: number, description: string) => {
     if (user.tokens >= amount) {
       const newTransaction = {
         id: `tx-${Date.now()}`,
@@ -263,8 +265,8 @@ export default function MyListingsView() {
         description,
         timestamp: new Date().toISOString(),
       };
-      updateUser({
-        tokens: user.tokens - amount,
+      await updateTokens(-amount);
+      await updateUser({
         transactions: [newTransaction, ...(user.transactions || [])],
       });
       return true;
@@ -1028,28 +1030,20 @@ export default function MyListingsView() {
                           <BarChart3 size={16} />
                         </button>
                         <button
-                          onClick={() => {
-                            const nextStatus: ListingStatus =
-                              req.status === "Archived"
-                                ? "Pending"
-                                : "Archived";
-                            updateListingRequest?.(req.id, {
-                              status: nextStatus,
-                            });
+                          onClick={async () => {
+                            if (confirm("Are you sure you want to delete this listing permanently? This cannot be undone.")) {
+                              try {
+                                await deleteDoc(doc(db, "listingRequests", req.id));
+                              } catch (err: any) {
+                                console.error("Error deleting listing:", err);
+                                alert("Failed to delete processing: " + (err.message || err));
+                              }
+                            }
                           }}
-                          className={cn(
-                            "p-2 border-2 transition-all",
-                            req.status === "Archived"
-                              ? "border-emerald-500 text-emerald-500 hover:bg-emerald-50"
-                              : "border-brand-red text-brand-red hover:bg-brand-red/5",
-                          )}
-                          title={
-                            req.status === "Archived"
-                              ? "Activate Listing"
-                              : "Deactivate Listing"
-                          }
+                          className="p-2 border-2 border-brand-red text-brand-red hover:bg-brand-red/5 dark:border-zinc-800 transition-all"
+                          title="Delete Listing"
                         >
-                          <Power size={16} />
+                          <Trash2 size={16} />
                         </button>
                       </>
                     )}
@@ -1062,7 +1056,7 @@ export default function MyListingsView() {
                       {isExpired ? "Renew Free" : "Extend (₦3,700)"}
                     </button>
                     <button
-                      onClick={() => {
+                      onClick={async () => {
                         if (req.isBoosted) {
                           updateListingRequest?.(req.id, { isBoosted: false });
                         } else {
@@ -1076,7 +1070,7 @@ export default function MyListingsView() {
                           }
 
                           if (
-                            handleSpendTokens(
+                            await handleSpendTokens(
                               BOOST_COST,
                               `Boosted Listing: ${req.title}`,
                             )

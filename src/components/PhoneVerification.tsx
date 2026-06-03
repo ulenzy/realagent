@@ -24,9 +24,6 @@ export default function PhoneVerification() {
   const [attemptsRemaining, setAttemptsRemaining] = useState(3);
   const [confirmationResult, setConfirmationResult] = useState<any>(null);
   
-  // Fallback state if reCAPTCHA or phone auth fails in sandboxed iframe
-  const [isMockFlow, setIsMockFlow] = useState(false);
-  
   const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
   const recaptchaVerifierRef = useRef<any>(null);
 
@@ -129,14 +126,10 @@ export default function PhoneVerification() {
       setStage(2);
       setResendTimer(59);
       setAttemptsRemaining(3);
-      setIsMockFlow(false);
     } catch (err: any) {
-      console.warn('Firebase Phone Auth failed (likely iframe popup/captchas block). Falling back to dynamic mock simulation:', err);
-      // Safe dynamic bypass for sandboxed iframe development
-      setIsMockFlow(true);
-      setStage(2);
-      setResendTimer(59);
-      setAttemptsRemaining(3);
+      console.error('Firebase Phone Auth failed:', err);
+      setError('Phone verification is temporarily unavailable. Please try again or contact support@realagents.ng.');
+      return;
     } finally {
       setLoading(false);
     }
@@ -151,16 +144,6 @@ export default function PhoneVerification() {
     const formattedNumber = `+234${phone}`;
 
     try {
-      if (isMockFlow) {
-        // Simple mock resend animation
-        setTimeout(() => {
-          setResendTimer(59);
-          setAttemptsRemaining(3);
-          setLoading(false);
-        }, 1000);
-        return;
-      }
-
       if (recaptchaVerifierRef.current) {
         const result = await signInWithPhoneNumber(auth, formattedNumber, recaptchaVerifierRef.current);
         setConfirmationResult(result);
@@ -171,10 +154,8 @@ export default function PhoneVerification() {
       }
     } catch (err: any) {
       console.error('Resend failed:', err);
-      setError('Failed to resend. Falling back to Mock SMS mode');
-      setIsMockFlow(true);
-      setResendTimer(59);
-      setAttemptsRemaining(3);
+      setError('Phone verification is temporarily unavailable. Please try again or contact support@realagents.ng.');
+      return;
     } finally {
       setLoading(false);
     }
@@ -217,21 +198,12 @@ export default function PhoneVerification() {
     const formattedNumber = `+234${phone}`;
 
     try {
-      if (isMockFlow) {
-        // If mockup mode, match standard debug PIN '123456'
-        if (code === '123456') {
-          await writeVerifiedStateToFirestore(formattedNumber);
-        } else {
-          handleFailedAttempt();
-        }
+      // Real verification
+      if (confirmationResult) {
+        await confirmationResult.confirm(code);
+        await writeVerifiedStateToFirestore(formattedNumber);
       } else {
-        // Real verification
-        if (confirmationResult) {
-          await confirmationResult.confirm(code);
-          await writeVerifiedStateToFirestore(formattedNumber);
-        } else {
-          throw new Error('No active verification session found.');
-        }
+        throw new Error('No active verification session found.');
       }
     } catch (err: any) {
       console.error('OTP confirmation failed:', err);
@@ -384,11 +356,6 @@ export default function PhoneVerification() {
                 <p className="text-sm font-black font-mono text-brand-black dark:text-white">
                   +234 •••• ••• {phone.slice(-4)}
                 </p>
-                {isMockFlow && (
-                  <div className="mt-2 py-1.5 px-3 bg-emerald-50 dark:bg-zinc-800/60 border border-emerald-500 text-emerald-700 dark:text-emerald-400 text-[10px] font-mono uppercase font-bold text-center">
-                    Iframe sandbox active — Enter Code 123456 to bypass
-                  </div>
-                )}
               </div>
 
               <div className="flex justify-center gap-2">

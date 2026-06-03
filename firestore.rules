@@ -145,7 +145,7 @@ service cloud.firestore {
 
       allow create: if (isAdmin() || (isSignedIn() && request.auth.uid == incoming().ownerId)) &&
                     isValidListingRequest(incoming()) &&
-                    (incoming().get('status', 'Pending') == 'Pending' || incoming().get('status', 'Draft') == 'Draft');
+                    incoming().get('status', 'Pending') in ['Pending', 'Draft', 'Agent Bidding'];
 
       allow update: if isAdmin() || (
         isSignedIn() && isValidListingRequest(incoming()) && (
@@ -211,6 +211,14 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    function isValidInspectionRequest(data) {
+      return data.listingId is string && data.listingId.size() <= 128 &&
+             data.buyerId is string && data.buyerId.size() <= 128 &&
+             data.agentId is string && data.agentId.size() <= 128 &&
+             data.status is string &&
+             data.feeStatus is string;
+    }
+
     // --- Inspection Requests ---
     match /inspectionRequests/{requestId} {
       allow read: if isSignedIn() && (
@@ -234,6 +242,12 @@ service cloud.firestore {
       );
       
       allow delete: if isAdmin() || (isSignedIn() && (resource.data.buyerId == request.auth.uid || resource.data.agentId == request.auth.uid));
+    }
+
+    function isValidAnnouncement(data) {
+      return data.title is string && data.title.size() <= 200 &&
+             data.body is string && data.body.size() <= 2000 &&
+             data.createdAt is string;
     }
 
     // --- Announcements ---

@@ -14,7 +14,7 @@ import { Home, Search, FileText, Zap, MessageCircle, Moon, Sun, Gavel, Heart, St
 import { cn } from './lib/utils';
 import { mockProperties } from './data/mockListings';
 import { ListingRequest, Property } from './types';
-import { doc, onSnapshot, collection, query, updateDoc, orderBy, limit, startAfter, getDocs } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, updateDoc, orderBy, limit, startAfter, getDocs, writeBatch } from 'firebase/firestore';
 import { NotificationDrawer } from './components/NotificationDrawer';
 import { db } from './lib/firebase';
 import Marketplace from './components/Marketplace';
@@ -50,7 +50,8 @@ export default function App() {
     setSelectedAgentId, 
     setIsListingFlow, 
     handleBackToMarketplace, 
-    handleSelectProperty 
+    handleSelectProperty,
+    mySpaceSubTab
   } = useNavigation();
   const { 
     isDarkMode, 
@@ -84,13 +85,6 @@ export default function App() {
   React.useEffect(() => {
     setIsNotificationOpen(false);
     setIsMessagingOpen(false);
-    
-    // Smooth high-reliability reset scroll position to top
-    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-    document.documentElement.scrollTop = 0;
-    if (document.body) {
-      document.body.scrollTop = 0;
-    }
   }, [activeTab, selectedPropertyId, selectedAgentId, isListingFlow]);
 
   let headerTitle = "DETAILS";
@@ -222,12 +216,15 @@ export default function App() {
   const handleMarkAllAsRead = async () => {
     if (!user) return;
     const unreads = notifications.filter(n => !n.read);
-    for (const n of unreads) {
-      try {
-        await updateDoc(doc(db, 'users', user.id, 'notifications', n.id), { read: true });
-      } catch (err) {
-        console.error("Mark all read error:", err);
-      }
+    if (unreads.length === 0) return;
+    try {
+      const batch = writeBatch(db);
+      unreads.forEach(n => {
+        batch.update(doc(db, 'users', user.id, 'notifications', n.id), { read: true });
+      });
+      await batch.commit();
+    } catch (err) {
+      console.error("Mark all read error:", err);
     }
   };
 
@@ -330,6 +327,20 @@ export default function App() {
     ? (mockProperties.find(p => p.id === selectedPropertyId) || selectedLiveProperty) 
     : null;
 
+  const [propertyNotFound, setPropertyNotFound] = React.useState(false);
+
+  React.useEffect(() => {
+    if (selectedPropertyId && !selectedProperty) {
+      setPropertyNotFound(false);
+      const timer = setTimeout(() => {
+        setPropertyNotFound(true);
+      }, 3000);
+      return () => clearTimeout(timer);
+    } else {
+      setPropertyNotFound(false);
+    }
+  }, [selectedPropertyId, selectedProperty]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-brand-gray dark:bg-[#0a0a0b]">
@@ -357,8 +368,12 @@ export default function App() {
     return <Login />;
   }
 
+  if (firebaseUser && user && !(user as any).phoneVerified) {
+    return <PhoneVerification />;
+  }
+
   // Check if any required field is missing from Firestore user profile for post-login profile validation
-  const isProfileIncomplete = !user || !user.username?.trim() || !user.phoneNumber?.trim() || !user.name?.trim() || !user.onboardingCompleted;
+  const isProfileIncomplete = !user || !user.username?.trim() || !user.phoneNumber?.trim() || !user.name?.trim() || !user.onboardingCompleted || !(user as any).phoneVerified;
 
   if (isProfileIncomplete) {
     return <CompleteProfile />;
@@ -527,7 +542,14 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className={cn("flex-1 overflow-x-hidden", !selectedPropertyId && !isListingFlow && "pb-32")}>
-        <AnimatePresence mode="wait">
+        <AnimatePresence 
+          mode="wait"
+          onExitComplete={() => {
+            window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+            document.documentElement.scrollTop = 0;
+            if (document.body) document.body.scrollTop = 0;
+          }}
+        >
           {isListingFlow ? (
             <motion.div
               key="listing-flow"
@@ -549,6 +571,40 @@ export default function App() {
             >
               <AgentProfile />
             </motion.div>
+          ) : selectedPropertyId && !selectedProperty ? (
+            propertyNotFound ? (
+              <motion.div
+                key="property-not-found"
+                initial={{ opacity: 0, x: 15 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -15 }}
+                transition={{ type: "spring", stiffness: 450, damping: 35 }}
+              >
+                <div className="min-h-screen flex items-center justify-center p-6 bg-brand-gray dark:bg-[#0a0a0b]">
+                  <div className="text-center max-w-sm">
+                    <div className="p-4 bg-zinc-100 dark:bg-zinc-800 border-4 border-brand-black mb-6 inline-block">
+                      <Home size={32} className="text-zinc-400" />
+                    </div>
+                    <h2 className="text-xl font-display font-black uppercase italic mb-3">Listing Unavailable</h2>
+                    <p className="text-sm text-zinc-500 mb-6">This listing may still be under review, has been removed, or is temporarily unavailable.</p>
+                    <button onClick={handleBackClick} className="brutalist-button-teal w-full">Back to Marketplace</button>
+                  </div>
+                </div>
+              </motion.div>
+            ) : (
+              <motion.div
+                key="property-loading-latency"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="min-h-screen flex items-center justify-center p-6 bg-brand-gray dark:bg-[#0a0a0b]"
+              >
+                <div className="flex flex-col items-center gap-4">
+                  <div className="w-12 h-12 border-4 border-brand-teal border-t-transparent animate-spin rounded-full"></div>
+                  <p className="text-brand-black dark:text-white font-black italic tracking-widest animate-pulse uppercase">Fetching Details...</p>
+                </div>
+              </motion.div>
+            )
           ) : selectedPropertyId && selectedProperty ? (
             <motion.div
               key="detail"
@@ -575,11 +631,13 @@ export default function App() {
               {activeTab === 'myspace' && (
                 <MySpace 
                   defaultActiveSubTab={
-                    user?.role === 'Seller' 
-                      ? 'My Listings' 
-                      : user?.role === 'Agent' 
-                        ? 'Bids' 
-                        : 'Wishlist'
+                    mySpaceSubTab || (
+                      user?.role === 'Seller' 
+                        ? 'My Listings' 
+                        : user?.role === 'Agent' 
+                          ? 'Bids' 
+                          : 'Wishlist'
+                    )
                   } 
                 />
               )}

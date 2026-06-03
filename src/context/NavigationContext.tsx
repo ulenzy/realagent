@@ -14,6 +14,8 @@ interface NavigationContextType {
   setIsListingFlow: (isOpen: boolean) => void;
   handleBackToMarketplace: () => void;
   handleSelectProperty: (id: string) => void;
+  mySpaceSubTab: 'Wishlist' | 'My Listings' | 'Bids' | 'Leaderboard' | null;
+  setMySpaceSubTab: (tab: 'Wishlist' | 'My Listings' | 'Bids' | 'Leaderboard' | null) => void;
 }
 
 const NavigationContext = createContext<NavigationContextType | undefined>(undefined);
@@ -24,18 +26,16 @@ export const NavigationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [selectedAgentId, setSelectedAgentIdState] = useState<string | null>(null);
   const [isListingFlow, setIsListingFlowState] = useState(false);
   const [viewedProperties, setViewedProperties] = useState<string[]>([]);
-
-  // Instantly scroll to top when navigation states change
-  const scrollToTop = () => {
-    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-  };
+  const [mySpaceSubTab, setMySpaceSubTab] = useState<'Wishlist' | 'My Listings' | 'Bids' | 'Leaderboard' | null>(null);
 
   const setActiveTab = (tab: ActiveTab) => {
     setActiveTabState(tab);
     setSelectedPropertyIdState(null);
     setSelectedAgentIdState(null);
     setIsListingFlowState(false);
-    scrollToTop();
+    if (tab !== 'myspace') {
+      setMySpaceSubTab(null);
+    }
   };
 
   const setSelectedPropertyId = (id: string | null) => {
@@ -43,7 +43,6 @@ export const NavigationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     if (id) {
       setSelectedAgentIdState(null);
       setIsListingFlowState(false);
-      scrollToTop();
     }
   };
 
@@ -52,7 +51,6 @@ export const NavigationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     if (id) {
       setSelectedPropertyIdState(null);
       setIsListingFlowState(false);
-      scrollToTop();
     }
   };
 
@@ -61,7 +59,6 @@ export const NavigationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     if (isOpen) {
       setSelectedPropertyIdState(null);
       setSelectedAgentIdState(null);
-      scrollToTop();
     }
   };
 
@@ -77,7 +74,6 @@ export const NavigationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     setSelectedPropertyIdState(null);
     setSelectedAgentIdState(null);
     setIsListingFlowState(false);
-    scrollToTop();
   };
 
   const handleSelectProperty = (id: string) => {
@@ -100,7 +96,9 @@ export const NavigationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       setSelectedAgentId,
       setIsListingFlow,
       handleBackToMarketplace,
-      handleSelectProperty
+      handleSelectProperty,
+      mySpaceSubTab,
+      setMySpaceSubTab
     }}>
       {children}
     </NavigationContext.Provider>

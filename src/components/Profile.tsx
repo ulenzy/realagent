@@ -77,6 +77,7 @@ export default function Profile({
     user,
     updateUser,
     updateUserEmail,
+    updateTokens,
     listingRequests,
     updateListingRequest,
     savedProperties,
@@ -91,6 +92,7 @@ export default function Profile({
     setSelectedAgentId: onViewAgentProfile,
     viewedProperties,
     setActiveTab,
+    setMySpaceSubTab,
   } = useNavigation();
 
   if (!user) return null;
@@ -215,8 +217,8 @@ export default function Profile({
 
     try {
       const currentPurchases = user.tokenPurchases || [];
+      await updateTokens(selectedBundle.tokens);
       await updateUser({
-        tokens: (user.tokens || 0) + selectedBundle.tokens,
         tokenPurchases: [newPurchase, ...currentPurchases]
       });
 
@@ -276,7 +278,7 @@ export default function Profile({
   const BOOST_COST = 20;
   const MAX_PRO_BOOSTS = 3;
 
-  const handleSpendTokens = (amount: number, description: string) => {
+  const handleSpendTokens = async (amount: number, description: string) => {
     if (user.tokens >= amount) {
       const newTransaction = {
         id: `tx-${Date.now()}`,
@@ -285,8 +287,8 @@ export default function Profile({
         description,
         timestamp: new Date().toISOString(),
       };
-      updateUser({
-        tokens: user.tokens - amount,
+      await updateTokens(-amount);
+      await updateUser({
         transactions: [newTransaction, ...(user.transactions || [])],
       });
       return true;
@@ -295,7 +297,7 @@ export default function Profile({
     return false;
   };
 
-  const handleBuyTokens = (amount: number, tokens: number) => {
+  const handleBuyTokens = async (amount: number, tokens: number) => {
     const newTransaction = {
       id: `tx-${Date.now()}`,
       type: "Credit" as const,
@@ -303,8 +305,8 @@ export default function Profile({
       description: `Purchased ${tokens} tokens`,
       timestamp: new Date().toISOString(),
     };
-    updateUser({
-      tokens: user.tokens + tokens,
+    await updateTokens(tokens);
+    await updateUser({
       transactions: [newTransaction, ...(user.transactions || [])],
     });
   };
@@ -555,8 +557,8 @@ export default function Profile({
     
     try {
       const updatedOwned = [...owned, avatar.id];
+      await updateTokens(-avatar.price);
       await updateUser({
-        tokens: (user.tokens || 0) - avatar.price,
         ownedAvatars: updatedOwned
       });
       
@@ -615,8 +617,8 @@ export default function Profile({
     
     try {
       const updatedOwned = [...owned, frame.id];
+      await updateTokens(-frame.price);
       await updateUser({
-        tokens: (user.tokens || 0) - frame.price,
         ownedFrames: updatedOwned
       });
       
@@ -673,8 +675,8 @@ export default function Profile({
     
     try {
       const updatedOwned = [...owned, title.id];
+      await updateTokens(-title.price);
       await updateUser({
-        tokens: (user.tokens || 0) - title.price,
         ownedTitles: updatedOwned
       });
       
@@ -941,7 +943,12 @@ export default function Profile({
       setActiveView("Wallet");
       return;
     }
-    if (action === "Saved Properties" || action === "My Listings") {
+    if (action === "Saved Properties") {
+      setMySpaceSubTab("Wishlist");
+      setActiveTab("myspace");
+      return;
+    }
+    if (action === "My Listings") {
       setActiveTab("myspace");
       return;
     }
@@ -3290,6 +3297,17 @@ export default function Profile({
           </button>
         </div>
       )}
+
+      {/* Page Title */}
+      <div className="border-b-4 border-brand-black dark:border-zinc-700 pb-2 mb-1 flex flex-col gap-1">
+        <h1 className="text-xl font-display font-black tracking-wider uppercase italic text-brand-black dark:text-white">
+          My Profile
+        </h1>
+        <p className="text-[9px] font-mono uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+          Personal identification credentials & account metrics
+        </p>
+      </div>
+
       {/* User Info Card */}
       <section className="bg-brand-black text-white p-6 border-4 border-brand-black relative overflow-hidden transition-colors duration-300 dark:border-zinc-700">
         <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
@@ -3790,9 +3808,9 @@ export default function Profile({
                 e.stopPropagation();
                 const willBeSubscriber = !isSubscriber;
                 if (willBeSubscriber) {
+                  updateTokens(450);
                   onUpdateUser({ 
-                    isSubscriber: true,
-                    tokens: (user.tokens || 0) + 450
+                    isSubscriber: true
                   });
                   if (addTransaction) {
                     addTransaction({

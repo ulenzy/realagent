@@ -773,7 +773,11 @@ export default function LandListingForm({ onSubmit, onBack, initialData }: LandL
                     try {
                       localStorage.removeItem('realagents_land_draft');
                       if (onSubmit) {
-                        await onSubmit({ ...formData, propertyCategory: 'Land', isDraft: true });
+                        const draftData = { ...formData, propertyCategory: 'Land', isDraft: true };
+                        if (!draftData.title || !draftData.title.trim()) {
+                          draftData.title = `${formData.landDetails?.landSize || ''}SQM ${formData.landDetails?.landUse || 'Land'} — Draft`;
+                        }
+                        await onSubmit(draftData);
                       }
                       setShowPublishModal(false);
                     } catch (err) {

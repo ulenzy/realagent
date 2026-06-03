@@ -9,7 +9,7 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigation } from '../context/NavigationContext';
 
 export default function ListPropertyFlow() {
-  const { user, updateUser, addTransaction, listingRequests, addListingRequest, drafts, saveDraft } = useAuth();
+  const { user, updateUser, updateTokens, addTransaction, listingRequests, addListingRequest, drafts, saveDraft } = useAuth();
   const { handleBackToMarketplace: onBack, setIsListingFlow, setActiveTab } = useNavigation();
 
 
@@ -219,7 +219,7 @@ export default function ListPropertyFlow() {
       const expires = new Date(Date.now() + 30 * 86400000).toISOString();
 
       try {
-        await updateUser({ tokens: user.tokens - 200 });
+        await updateTokens(-200);
         await addTransaction({
           id: `tx-${Date.now()}`,
           type: 'Debit',

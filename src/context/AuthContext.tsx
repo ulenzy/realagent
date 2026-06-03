@@ -47,6 +47,7 @@ interface AuthContextType {
   updateListingRequest: (id: string, updates: Partial<ListingRequest>) => Promise<void>;
   updateUser: (updates: Partial<User>) => Promise<void>;
   updateUserEmail: (newEmail: string) => Promise<void>;
+  updateTokens: (delta: number) => Promise<void>;
   addTransaction: (transaction: Transaction) => Promise<void>;
   updateAgentTrustScore: (agentId: string, event: TrustScoreEvent) => Promise<void>;
   drafts: ListingRequest[];
@@ -603,22 +604,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       landDetails: listingRequest.landDetails,
       price: priceNum,
       listingType: listingRequest.listingType || ('Sale' as ListingType),
-      sizeSqm: listingRequest.sizeSqm || 850,
-      bedrooms: listingRequest.bedrooms || 5,
-      bathrooms: listingRequest.bathrooms || 6,
-      estateName: listingRequest.estateName || 'Golden Gate Estate',
+      sizeSqm: Number(listingRequest.sizeSqm) || 0,
+      bedrooms: Number(listingRequest.bedrooms) || 0,
+      bathrooms: Number(listingRequest.bathrooms) || 0,
+      estateName: listingRequest.estateName || '',
       location: {
-        state: state || 'Lagos',
-        city: area || 'Ikeja',
-        area: area || 'Ikeja',
-        address: listingRequest.googlePinLink || `${area}, ${state}`,
+        state: state || 'FCT',
+        city: area || 'Abuja',
+        area: area || 'Abuja',
+        address: listingRequest.googlePinLink || `${area || 'Abuja'}, ${state || 'FCT'}`,
         coordinates: { lat, lng }
       },
-      image: '/regenerated_image_1778928319302.png',
-      gallery: [
-        '/regenerated_image_1778928319302.png',
-        'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&q=80&w=800'
-      ],
+      image: listingRequest.listingRequirements?.photos?.[0] || '/placeholder-property.png',
+      gallery: listingRequest.listingRequirements?.photos || [],
       agent: agentObj,
       roiPotential: (marketIntelligence.roiPotential || 'High') as ROILevel,
       developmentInsight: {
@@ -674,11 +672,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Read the user document inside transaction
         const userSnap = await transaction.get(userDocRef);
         
-        // Count actual draft documents using getDocs inside the transaction
-        const draftQuery = query(collection(db, 'drafts'), where('ownerId', '==', user.id));
-        const draftSnap = await getDocs(draftQuery);
-        
-        if (draftSnap.size >= 3) {
+        const currentCount = userSnap.exists() ? (userSnap.data().draftCount || 0) : 0;
+        if (currentCount >= 3) {
           throw new Error("Draft limit reached — you have 3 saved drafts. Submit or delete one before saving a new draft.");
         }
 
@@ -696,7 +691,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         transaction.set(newDraftDocRef, draftDocData);
 
         // Increment draftCount atomically on the user document
-        const currentCount = userSnap.exists() ? (userSnap.data().draftCount || 0) : 0;
         transaction.update(userDocRef, { draftCount: currentCount + 1 });
       });
 
@@ -804,11 +798,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!user) return;
     try {
       const dbUpdates = { ...updates } as any;
-      if (dbUpdates.tokens !== undefined && typeof dbUpdates.tokens === 'number') {
-        const delta = dbUpdates.tokens - (user.tokens || 0);
-        dbUpdates.tokens = increment(delta);
-      }
+      delete dbUpdates.tokens;
+      if (Object.keys(dbUpdates).length === 0) return;
       await updateDoc(doc(db, 'users', user.id), dbUpdates);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${user.id}`);
+    }
+  };
+
+  const updateTokens = async (delta: number) => {
+    if (!user) return;
+    try {
+      await updateDoc(doc(db, 'users', user.id), { tokens: increment(delta) });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${user.id}`);
     }
@@ -925,7 +926,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <AuthContext.Provider value={{ 
       user, firebaseUser, loading, error, listingRequests, platformListings, savedProperties,
       signInWithGoogle, signInWithFacebook, signInWithEmail, signUpWithEmail, signInWithGoogleMock, signInWithFacebookMock, logout,
-      toggleSavedProperty, addListingRequest, updateListingRequest, updateUser, updateUserEmail, addTransaction, updateAgentTrustScore,
+      toggleSavedProperty, addListingRequest, updateListingRequest, updateUser, updateUserEmail, updateTokens, addTransaction, updateAgentTrustScore,
       drafts, saveDraft, updateDraft, deleteDraft, promoteDraftToListing,
       loadMorePlatformListings, loadMoreListingRequests
     }}>
