@@ -209,26 +209,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               unsubscribePlatformListingsRef.current();
             }
 
-            const platformQuery = query(
-              collection(db, 'listingRequests'),
-              where('status', '==', 'Agent Bidding'),
-              orderBy('submittedAt', 'desc'),
-              limit(15)
-            );
-            unsubscribePlatformListingsRef.current = onSnapshot(platformQuery, (snapshot) => {
-              const pListings = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-              } as any));
-              setLivePlatformListings(pListings);
-              if (snapshot.docs.length > 0) {
-                setPlatformListingsLastDoc(snapshot.docs[snapshot.docs.length - 1]);
-              } else {
-                setPlatformListingsLastDoc(null);
-              }
-            }, (err) => {
-              console.error("Platform listings snapshot error:", err);
-            });
+            if (userData.role === 'Agent' || userData.role === 'Admin') {
+              const platformQuery = query(
+                collection(db, 'listingRequests'),
+                where('status', '==', 'Agent Bidding'),
+                orderBy('submittedAt', 'desc'),
+                limit(15)
+              );
+              unsubscribePlatformListingsRef.current = onSnapshot(platformQuery, (snapshot) => {
+                const pListings = snapshot.docs.map(doc => ({
+                  id: doc.id,
+                  ...doc.data()
+                } as any));
+                setLivePlatformListings(pListings);
+                if (snapshot.docs.length > 0) {
+                  setPlatformListingsLastDoc(snapshot.docs[snapshot.docs.length - 1]);
+                } else {
+                  setPlatformListingsLastDoc(null);
+                }
+              }, (err) => {
+                console.error("Platform listings snapshot error:", err);
+              });
+            } else {
+              setLivePlatformListings([]);
+              setPlatformListingsLastDoc(null);
+            }
           } else {
             // Initial profile creation
             const nameParts = (fUser.displayName || '').trim().split(/\s+/);
@@ -719,8 +724,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const docRef = doc(db, 'drafts', draftId);
       await deleteDoc(docRef);
-      const newCount = Math.max(0, (user.draftCount || 0) - 1);
-      await updateUser({ draftCount: newCount });
+      await updateDoc(doc(db, 'users', user.id), { draftCount: increment(-1) });
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `drafts/${draftId}`);
     }
@@ -860,6 +864,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const loadMorePlatformListings = async (): Promise<void> => {
+    if (!user || (user.role !== 'Agent' && user.role !== 'Admin')) return;
     if (!platformListingsLastDoc) return;
     try {
       const q = query(

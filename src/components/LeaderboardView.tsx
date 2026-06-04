@@ -6,7 +6,7 @@ import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../lib/firebase";
 
 interface LeaderboardViewProps {
-  onBack: () => void;
+  onBack?: () => void;
 }
 
 const MOCK_LEADER_AGENTS = [
@@ -21,6 +21,7 @@ export default function LeaderboardView({ onBack }: LeaderboardViewProps) {
   const { user } = useAuth();
   const [agents, setAgents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const isAgentUser = user?.isAgent === true || user?.role === 'Agent' || user?.role === 'Admin';
 
   useEffect(() => {
     const fetchAllAgents = async () => {
@@ -110,13 +111,15 @@ export default function LeaderboardView({ onBack }: LeaderboardViewProps) {
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <button
-            onClick={onBack}
-            className="flex items-center gap-1.5 text-xs font-black uppercase text-zinc-550 dark:text-zinc-400 hover:text-brand-black dark:hover:text-white transition-colors mb-2"
-          >
-            <ArrowLeft size={16} />
-            Back to Bids
-          </button>
+          {onBack && (
+            <button
+              onClick={onBack}
+              className="flex items-center gap-1.5 text-xs font-black uppercase text-zinc-550 dark:text-zinc-400 hover:text-brand-black dark:hover:text-white transition-colors mb-2"
+            >
+              <ArrowLeft size={16} />
+              {isAgentUser ? "Back to Bids" : "Back"}
+            </button>
+          )}
           <h2 className="text-2xl font-display font-black uppercase tracking-tight text-zinc-900 dark:text-white flex items-center gap-2">
             <Trophy className="text-amber-500 fill-amber-500 animate-pulse" size={24} />
             PARTNERSHIP RANKINGS
@@ -171,7 +174,20 @@ export default function LeaderboardView({ onBack }: LeaderboardViewProps) {
           </span>
         </div>
       ) : (
-        <div className="bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 shadow-brutal-sm overflow-hidden rounded-none">
+        <div className="space-y-4">
+          {isAgentUser && (() => {
+            const myRank = agents.find(a => a.id === user?.id)?.rank;
+            if (myRank) {
+              return (
+                <div id="leaderboard-your-rank" className="bg-brand-teal text-brand-black border-4 border-brand-black p-4 shadow-brutal-xs font-display font-black text-center uppercase italic tracking-wider text-lg rotate-[0.5deg]">
+                  YOUR RANK: #{myRank}
+                </div>
+              );
+            }
+            return null;
+          })()}
+
+          <div className="bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 shadow-brutal-sm overflow-hidden rounded-none">
           {/* Table Header */}
           <div className="grid grid-cols-12 gap-2 bg-brand-black text-white px-6 py-3.5 text-xs font-black uppercase tracking-wider rounded-none">
             <div className="col-span-2">Rank</div>
@@ -244,6 +260,7 @@ export default function LeaderboardView({ onBack }: LeaderboardViewProps) {
             })}
           </div>
         </div>
+      </div>
       )}
     </div>
   );

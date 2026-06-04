@@ -14,7 +14,7 @@ export default function ListPropertyFlow() {
 
 
   const [listingCategory, setListingCategory] = useState<'Building' | 'Land' | null>(null);
-  const [monthlyFeePaid, setMonthlyFeePaid] = useState(false);
+  const [monthlyFeePaidState, setMonthlyFeePaidState] = useState(false);
   const [tokenError, setTokenError] = useState<string | null>(null);
   const [draftError, setDraftError] = useState<string | null>(null);
   const [draftSaved, setDraftSaved] = useState(false);
@@ -28,23 +28,7 @@ export default function ListPropertyFlow() {
     (req) => req.monthlyFeeExpiresAt && req.monthlyFeeExpiresAt > nowISO
   );
 
-  // Setup pending payment state for the first listing automatically
-  useEffect(() => {
-    if (user && user.verifiedPropertySeller) {
-      if (!hasActiveListing) {
-        const now = new Date().toISOString();
-        const expires = new Date(Date.now() + 30 * 86400000).toISOString();
-        const pendingPayment = {
-          listingFeeStatus: 'Monthly Paid',
-          verificationFeePaid: true,
-          verificationFeePaidAt: user.verificationFeePaidAt || now,
-          monthlyFeePaidAt: now,
-          monthlyFeeExpiresAt: expires,
-        };
-        localStorage.setItem('realagents_pending_payment', JSON.stringify(pendingPayment));
-      }
-    }
-  }, [user, listingRequests, hasActiveListing]);
+  const monthlyFeePaid = monthlyFeePaidState || (user?.listingFeeStatus === 'Monthly Paid' && user?.monthlyFeeExpiresAt && user.monthlyFeeExpiresAt > nowISO);
 
 
   if (!user) {
@@ -194,18 +178,19 @@ export default function ListPropertyFlow() {
 
   // --- 2. Monthly Listing Fee check ---
   if (hasActiveListing && !monthlyFeePaid) {
-    const handlePayMonthlyNaira = () => {
+    const handlePayMonthlyNaira = async () => {
       const now = new Date().toISOString();
       const expires = new Date(Date.now() + 30 * 86400000).toISOString();
-      const pendingPayment = {
-        listingFeeStatus: 'Monthly Paid',
-        verificationFeePaid: true,
-        verificationFeePaidAt: user.verificationFeePaidAt || now,
-        monthlyFeePaidAt: now,
-        monthlyFeeExpiresAt: expires,
-      };
-      localStorage.setItem('realagents_pending_payment', JSON.stringify(pendingPayment));
-      setMonthlyFeePaid(true);
+      try {
+        await updateUser({
+          listingFeeStatus: 'Monthly Paid',
+          monthlyFeePaidAt: now,
+          monthlyFeeExpiresAt: expires,
+        });
+        setMonthlyFeePaidState(true);
+      } catch (err: any) {
+        console.error('Error paying monthly fee via Naira:', err);
+      }
     };
 
     const handlePayMonthlyTokens = async () => {
@@ -228,15 +213,12 @@ export default function ListPropertyFlow() {
           timestamp: now,
         });
 
-        const pendingPayment = {
+        await updateUser({
           listingFeeStatus: 'Monthly Paid',
-          verificationFeePaid: true,
-          verificationFeePaidAt: user.verificationFeePaidAt || now,
           monthlyFeePaidAt: now,
           monthlyFeeExpiresAt: expires,
-        };
-        localStorage.setItem('realagents_pending_payment', JSON.stringify(pendingPayment));
-        setMonthlyFeePaid(true);
+        });
+        setMonthlyFeePaidState(true);
       } catch (err: any) {
         console.error('Error paying monthly fee via wallet tokens:', err);
         setTokenError('Failed to pay with tokens. Please try again.');
@@ -319,9 +301,6 @@ export default function ListPropertyFlow() {
       const now = new Date().toISOString();
       const expires = new Date(Date.now() + 30 * 86400000).toISOString();
       
-      const pendingPaymentRaw = localStorage.getItem('realagents_pending_payment');
-      let pendingPayment = pendingPaymentRaw ? JSON.parse(pendingPaymentRaw) : null;
-      
       const PLATFORM_COMMISSION_RATE = 5;
       const resolvedCommission = user.commissionRate !== undefined ? user.commissionRate : PLATFORM_COMMISSION_RATE;
       
@@ -397,12 +376,12 @@ export default function ListPropertyFlow() {
           estateName: formData.landDetails?.isEstatePlot ? (formData.landDetails?.estateName || '') : '',
           amenities: formData.landDetails?.infrastructure || [],
           googlePinLink: formData.googlePinLink || formData.landDetails?.locationPin || '',
-          listingFeeStatus: pendingPayment?.listingFeeStatus || 'Monthly Unpaid',
-          listingFeePaidAt: pendingPayment?.monthlyFeePaidAt || '',
+          listingFeeStatus: user.listingFeeStatus || 'Monthly Unpaid',
+          listingFeePaidAt: user.monthlyFeePaidAt || '',
           verificationFeePaid: user.verifiedPropertySeller || false,
           verificationFeePaidAt: user.verificationFeePaidAt || '',
-          monthlyFeePaidAt: pendingPayment?.monthlyFeePaidAt || '',
-          monthlyFeeExpiresAt: pendingPayment?.monthlyFeeExpiresAt || '',
+          monthlyFeePaidAt: user.monthlyFeePaidAt || '',
+          monthlyFeeExpiresAt: user.monthlyFeeExpiresAt || '',
           dealStatus: 'Open',
           listingRequirements: {
             titleDocumentFileName: formData.titleDocumentFile ? formData.titleDocumentFile.name : '',
@@ -440,12 +419,12 @@ export default function ListPropertyFlow() {
           estateName: formData.estateName,
           amenities: formData.amenities,
           googlePinLink: formData.googlePinLink,
-          listingFeeStatus: pendingPayment?.listingFeeStatus || 'Monthly Unpaid',
-          listingFeePaidAt: pendingPayment?.monthlyFeePaidAt || '',
+          listingFeeStatus: user.listingFeeStatus || 'Monthly Unpaid',
+          listingFeePaidAt: user.monthlyFeePaidAt || '',
           verificationFeePaid: user.verifiedPropertySeller || false,
           verificationFeePaidAt: user.verificationFeePaidAt || '',
-          monthlyFeePaidAt: pendingPayment?.monthlyFeePaidAt || '',
-          monthlyFeeExpiresAt: pendingPayment?.monthlyFeeExpiresAt || '',
+          monthlyFeePaidAt: user.monthlyFeePaidAt || '',
+          monthlyFeeExpiresAt: user.monthlyFeeExpiresAt || '',
           dealStatus: 'Open',
           listingRequirements: {
             titleDocumentFileName: formData.titleDocumentFile ? formData.titleDocumentFile.name : '',
@@ -471,7 +450,6 @@ export default function ListPropertyFlow() {
       }
 
       await addListingRequest(finalRequest);
-      localStorage.removeItem('realagents_pending_payment');
       setSubmitted(true);
     } catch (err) {
       console.error("Failed to submit property listing:", err);

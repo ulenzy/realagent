@@ -53,6 +53,7 @@ import {
 import { useAuth, DEFAULT_PREFERENCES } from "../context/AuthContext";
 import { Sliders, Globe, AlertOctagon, ChevronDown } from "lucide-react";
 import { useNavigation } from "../context/NavigationContext";
+import LeaderboardView from "./LeaderboardView";
 import { getUserAvatarUrl } from "../lib/avatar";
 import { AVATAR_COSMETICS, FRAME_COSMETICS, TITLE_COSMETICS } from "../constants/cosmetics";
 import { Crown, Flame, ShoppingBag, Tag } from "lucide-react";
@@ -3753,6 +3754,31 @@ export default function Profile({
           />
         </section>
       )}
+
+      {/* Leaderboard Standing & Discovery Section */}
+      <section id="profile-leaderboard-section" className="flex flex-col gap-4">
+        {user.role === "Agent" ? (
+          <div className="pl-2">
+            <h3 className="text-xs font-display font-black uppercase text-zinc-400 tracking-widest">
+              YOUR LEADERSHIP STANDING
+            </h3>
+            <p className="text-[10px] text-zinc-500 uppercase tracking-tight font-medium">
+              Your ranking on the platform based on verified trust scores and deals closed.
+            </p>
+          </div>
+        ) : (
+          <div className="pl-2">
+            <h3 className="text-xs font-display font-black uppercase text-zinc-400 tracking-widest">
+              TOP AGENTS THIS MONTH
+            </h3>
+            <p className="text-[10px] text-zinc-500 uppercase tracking-tight font-medium">
+              The most trusted agents on RealAgents — verified by platform performance.
+            </p>
+          </div>
+        )}
+
+        <LeaderboardView />
+      </section>
 
       {/* List Options */}
       <section className="flex flex-col gap-2">

@@ -1,18 +1,75 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Heart, SlidersHorizontal, ArrowUpDown } from 'lucide-react';
+import { collection, query, where, getDocs, documentId } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { useNavigation } from '../context/NavigationContext';
 import { mockProperties } from '../data/mockListings';
 import { PropertyCard } from './Marketplace';
+import { Property } from '../types';
 
 export default function WishlistView() {
   const { savedProperties, toggleSavedProperty } = useAuth();
   const { handleSelectProperty: onSelectProperty, setSelectedAgentId: onViewAgentProfile } = useNavigation();
   const [sortBy, setSortBy] = useState<'default' | 'price-asc' | 'price-desc' | 'title'>('default');
+  const [liveProperties, setLiveProperties] = useState<Property[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  // Fetch live properties from Firestore
+  useEffect(() => {
+    const fetchLiveProperties = async () => {
+      if (savedProperties.length === 0) {
+        setLiveProperties([]);
+        return;
+      }
+
+      setLoading(true);
+      try {
+        const chunks: string[][] = [];
+        const idsToFetch = savedProperties;
+        for (let i = 0; i < idsToFetch.length; i += 30) {
+          chunks.push(idsToFetch.slice(i, i + 30));
+        }
+
+        const fetchedProps: Property[] = [];
+        for (const chunk of chunks) {
+          if (chunk.length === 0) continue;
+          const q = query(collection(db, 'properties'), where(documentId(), 'in', chunk));
+          const snapshot = await getDocs(q);
+          snapshot.forEach(docSnap => {
+            fetchedProps.push({ id: docSnap.id, ...docSnap.data() } as Property);
+          });
+        }
+        setLiveProperties(fetchedProps);
+      } catch (err) {
+        console.error("Error fetching live properties for wishlist:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchLiveProperties();
+  }, [savedProperties]);
 
   // Filter and sort the properties
   const processedProperties = useMemo(() => {
-    let list = mockProperties.filter(p => savedProperties.includes(p.id));
+    const mergedMap = new Map<string, Property>();
+
+    // Add mock properties first
+    mockProperties.forEach(p => {
+      if (savedProperties.includes(p.id)) {
+        mergedMap.set(p.id, p);
+      }
+    });
+
+    // Add live properties (overwriting or complementing)
+    liveProperties.forEach(p => {
+      if (savedProperties.includes(p.id)) {
+        mergedMap.set(p.id, p);
+      }
+    });
+
+    let list = Array.from(mergedMap.values());
 
     if (sortBy === 'price-asc') {
       list = [...list].sort((a, b) => a.price - b.price);
@@ -22,7 +79,7 @@ export default function WishlistView() {
       list = [...list].sort((a, b) => a.title.localeCompare(b.title));
     }
     return list;
-  }, [savedProperties, sortBy]);
+  }, [savedProperties, liveProperties, sortBy]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -58,7 +115,14 @@ export default function WishlistView() {
         )}
       </div>
 
-      {savedProperties.length === 0 ? (
+      {loading ? (
+        <div className="bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 p-12 shadow-brutal-sm text-center py-20 flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-brand-teal border-t-transparent animate-spin rounded-full"></div>
+          <p className="text-zinc-500 dark:text-zinc-400 font-extrabold uppercase text-xs tracking-wider animate-pulse">
+            Synchronizing saved listings...
+          </p>
+        </div>
+      ) : savedProperties.length === 0 ? (
         <div className="bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 p-12 shadow-brutal-sm text-center py-20 flex flex-col items-center gap-4">
           <div className="w-20 h-20 bg-brand-gray dark:bg-zinc-800 border-4 border-brand-black flex items-center justify-center rounded-full">
             <Heart size={40} className="text-zinc-400" />

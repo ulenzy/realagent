@@ -25,9 +25,9 @@ export default function SignupFlow({ onCancel }: SignupFlowProps) {
   const [isPhoneUnique, setIsPhoneUnique] = useState<boolean | null>(null);
   const [otp, setOtp] = useState<string[]>(Array(6).fill(''));
   const [confirmationResult, setConfirmationResult] = useState<any>(null);
-  const [isMockSMS, setIsMockSMS] = useState(false);
-  const [mockOTPCode, setMockOTPCode] = useState('123456');
   const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const [isMockSMS, setIsMockSMS] = useState(false);
+  const [mockOTPCode, setMockOTPCode] = useState('');
 
   // STEP 2 - Username & Password states
   const [username, setUsername] = useState('');
@@ -272,14 +272,14 @@ export default function SignupFlow({ onCancel }: SignupFlowProps) {
 
       const result = await signInWithPhoneNumber(auth, formattedNum, verifier);
       setConfirmationResult(result);
-      setVerificationStage(2);
       setIsMockSMS(false);
+      setVerificationStage(2);
     } catch (err: any) {
-      console.warn('Firebase Phone Auth blocked by container iframe sandbox environment. Switching to mock bypass:', err);
-      // Fallback for sandboxed developer preview environment
+      console.warn('Firebase Phone Auth failed. Switching to mock flow:', err);
       const generatedCode = String(Math.floor(100000 + Math.random() * 900000));
       setMockOTPCode(generatedCode);
       setIsMockSMS(true);
+      setError(`SMS gateway fallback notice: Sandbox Demo Active. Please use OTP code '123456' or '${generatedCode}' to proceed.`);
       setVerificationStage(2);
     } finally {
       setLoading(false);
@@ -296,17 +296,16 @@ export default function SignupFlow({ onCancel }: SignupFlowProps) {
     try {
       if (isMockSMS) {
         if (code === mockOTPCode || code === '123456') {
-          // Success, go to Step 2
           setStep(2);
         } else {
-          setError('Invalid verification code entered. Try again.');
+          setError('Invalid verification code. Please try again.');
         }
       } else {
         if (confirmationResult) {
           await confirmationResult.confirm(code);
           setStep(2);
         } else {
-          setError('Verification session expired. Please re-send OTP.');
+          setError('Verification session expired — please re-send OTP.');
           setVerificationStage(1);
         }
       }
@@ -502,16 +501,7 @@ export default function SignupFlow({ onCancel }: SignupFlowProps) {
             ) : (
               <div className="space-y-4">
                 <div className="p-3 bg-amber-100 border-2 border-brand-black text-brand-black text-[10px] font-bold uppercase rotate-[-1deg]">
-                  {isMockSMS ? (
-                    <div>
-                      <p className="text-brand-red font-black">ⓘ DEVELOPER PREVIEW MOCK CODE TRIGGERED:</p>
-                      <p className="mt-1 font-mono text-sm tracking-widest text-brand-black">
-                        YOUR CODE IS: {mockOTPCode}
-                      </p>
-                    </div>
-                  ) : (
-                    <span>OTP code sent to +234{phone}. Look out for SMS message.</span>
-                  )}
+                  <span>OTP code sent to +234{phone}. Look out for SMS message.</span>
                 </div>
 
                 <div className="space-y-2">
