@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import { Trophy, ArrowLeft, Award, Sparkles, Shield, Percent, Briefcase } from "lucide-react";
-import { cn } from "../lib/utils";
+import { cn, hasState } from "../lib/utils";
 import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../lib/firebase";
 
@@ -21,7 +21,7 @@ export default function LeaderboardView({ onBack }: LeaderboardViewProps) {
   const { user } = useAuth();
   const [agents, setAgents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const isAgentUser = user?.isAgent === true || user?.role === 'Agent' || user?.role === 'Admin';
+  const isAgentUser = hasState(user, 'Agent') || hasState(user, 'Admin');
 
   useEffect(() => {
     const fetchAllAgents = async () => {
@@ -56,7 +56,7 @@ export default function LeaderboardView({ onBack }: LeaderboardViewProps) {
         }
 
         const usersRef = collection(db, 'users');
-        const q = query(usersRef, where('role', '==', 'Agent'));
+        const q = query(usersRef, where('userStates', 'array-contains', 'Agent'));
         const querySnapshot = await getDocs(q);
         
         let agentsList: any[] = [];
@@ -74,7 +74,7 @@ export default function LeaderboardView({ onBack }: LeaderboardViewProps) {
           });
         });
 
-        if (user.role === 'Agent' && !agentsList.some(a => a.id === user.id)) {
+        if (hasState(user, 'Agent') && !agentsList.some(a => a.id === user.id)) {
           agentsList.push({
             id: user.id,
             name: user.name,

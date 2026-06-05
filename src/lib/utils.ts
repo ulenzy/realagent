@@ -1,6 +1,12 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { formatCurrency } from './format';
+import { User, UserState } from '../types';
+
+export function hasState(user: User | null | undefined, state: UserState): boolean {
+  if (!user) return false;
+  return user.userStates?.includes(state) ?? false;
+}
 
 export { formatCurrency };
 

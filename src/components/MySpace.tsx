@@ -5,18 +5,31 @@ import MyListingsView from './MyListingsView';
 import AgentBidding from './AgentBidding';
 import LeaderboardView from './LeaderboardView';
 import { useAuth } from '../context/AuthContext';
+import { hasState } from '../lib/utils';
 
 interface MySpaceProps {
-  defaultActiveSubTab: 'Wishlist' | 'My Listings' | 'Bids' | 'Leaderboard';
+  defaultActiveSubTab?: 'Wishlist' | 'My Listings' | 'Bids' | 'Leaderboard';
 }
 
 export default function MySpace({ defaultActiveSubTab }: MySpaceProps) {
   const { user } = useAuth();
-  const isAgentUser = user?.isAgent === true || user?.role === 'Agent' || user?.role === 'Admin';
+  const isAgentUser = hasState(user, 'Agent') || hasState(user, 'Admin');
 
-  const initialTab = (defaultActiveSubTab === 'Bids' || defaultActiveSubTab === 'Leaderboard') && !isAgentUser
-    ? (user?.role === 'Seller' ? 'My Listings' : 'Wishlist')
-    : defaultActiveSubTab;
+  // Determine the default sub-tab priority from userStates: 
+  // 1. Agent -> Bids
+  // 2. Seller and not Agent -> My Listings
+  // 3. Otherwise -> Wishlist
+  const getPriorityTab = (): 'Wishlist' | 'My Listings' | 'Bids' | 'Leaderboard' => {
+    if (hasState(user, 'Agent')) return 'Bids';
+    if (hasState(user, 'Seller')) return 'My Listings';
+    return 'Wishlist';
+  };
+
+  const initialTabFromProps = defaultActiveSubTab || getPriorityTab();
+
+  const initialTab = (initialTabFromProps === 'Bids' || initialTabFromProps === 'Leaderboard') && !isAgentUser
+    ? (hasState(user, 'Seller') ? 'My Listings' : 'Wishlist')
+    : initialTabFromProps;
 
   const [activeSubTab, setActiveSubTab] = useState<'Wishlist' | 'My Listings' | 'Bids' | 'Leaderboard'>(
     initialTab
@@ -94,7 +107,7 @@ export default function MySpace({ defaultActiveSubTab }: MySpaceProps) {
           <AgentBidding onViewLeaderboard={() => setActiveSubTab('Leaderboard')} />
         )}
         {activeSubTab === 'Leaderboard' && (
-          <LeaderboardView onBack={() => setActiveSubTab(isAgentUser ? 'Bids' : (user?.role === 'Seller' ? 'My Listings' : 'Wishlist'))} />
+          <LeaderboardView onBack={() => setActiveSubTab(isAgentUser ? 'Bids' : (hasState(user, 'Seller') ? 'My Listings' : 'Wishlist'))} />
         )}
       </div>
     </div>

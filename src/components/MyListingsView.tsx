@@ -17,6 +17,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Settings,
+  Archive,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { useAuth } from "../context/AuthContext";
@@ -131,15 +132,18 @@ export default function MyListingsView() {
     addTransaction,
     drafts = [],
     promoteDraftToListing,
-    deleteDraft
+    deleteDraft,
+    deleteListing
   } = useAuth();
   const { setIsListingFlow } = useNavigation();
 
   const [currentTab, setCurrentTab] = useState<'live' | 'drafts'>('live');
 
+  const [isArchivesOpen, setIsArchivesOpen] = useState(false);
+
   const filteredRequests = useMemo(() => {
     if (currentTab === 'live') {
-      return listingRequests.filter(req => req.status !== 'Draft');
+      return listingRequests.filter(req => req.status !== 'Draft' && req.status !== 'Archived');
     } else {
       return drafts.map(d => ({ ...d, status: 'Draft' as const }));
     }
@@ -157,6 +161,7 @@ export default function MyListingsView() {
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [renewalError, setRenewalError] = useState<string | null>(null);
   const [renewalSuccessMsg, setRenewalSuccessMsg] = useState<string | null>(null);
+  const [renewalPanelListing, setRenewalPanelListing] = useState<ListingRequest | null>(null);
 
   const [correctionListingId, setCorrectionListingId] = useState<string | null>(null);
   const [correctionCategory, setCorrectionCategory] = useState<'Price Adjustment' | 'Location Correction' | 'Photo Update' | 'Document Update' | 'Description Change' | 'Other'>('Price Adjustment');
@@ -183,25 +188,32 @@ export default function MyListingsView() {
 
   if (!user) return null;
 
-  const handleRenewListing = async (reqId: string, title: string, method: 'naira' | 'tokens') => {
+  const handleRenewListing = async (
+    reqId: string, 
+    title: string, 
+    method: 'naira' | 'tokens', 
+    durationDays = 30, 
+    nairaPrice = 3690, 
+    tokenCost = 200
+  ) => {
     setRenewalError(null);
     setRenewalSuccessMsg(null);
     const now = new Date().toISOString();
-    const expires = new Date(Date.now() + 30 * 86400000).toISOString();
+    const expires = new Date(Date.now() + durationDays * 86400000).toISOString();
 
     if (method === 'tokens') {
-      if (user.tokens < 200) {
-        setRenewalError('Insufficient tokens — top up in Profile');
+      if (user.tokens < tokenCost) {
+        setRenewalError(`Insufficient tokens — required: ${tokenCost}`);
         return;
       }
       try {
-        await updateTokens(-200);
+        await updateTokens(-tokenCost);
         if (addTransaction) {
           await addTransaction({
             id: `tx-${Date.now()}`,
             type: 'Debit',
-            amount: 200,
-            description: `Listing renewal: ${title}`,
+            amount: tokenCost,
+            description: `Listing renewal (${durationDays} days): ${title}`,
             timestamp: now
           });
         }
@@ -218,7 +230,9 @@ export default function MyListingsView() {
         status: 'Approved',
         listingFeeStatus: 'Monthly Paid',
         monthlyFeePaidAt: now,
-        monthlyFeeExpiresAt: expires
+        monthlyFeeExpiresAt: expires,
+        listingDurationDays: durationDays,
+        listingTotalDays: durationDays
       });
 
       // Update linked property on Firestore or localStorage
@@ -244,7 +258,19 @@ export default function MyListingsView() {
         window.dispatchEvent(new Event('local_guest_properties_updated'));
       }
 
-      setRenewalSuccessMsg(`Your listing ${title} is live again on RealAgents.`);
+      // Send notification to seller
+      try {
+        await sendNotification(user.id, {
+          type: 'listing_approved',
+          title: 'Listing Renewed',
+          body: `Your listing "${title}" has been successfully renewed for ${durationDays} days.`,
+          data: { listingRequestId: reqId }
+        });
+      } catch (noErr) {
+        console.warn("Failed to dispatch notification:", noErr);
+      }
+
+      setRenewalSuccessMsg(`Your listing ${title} is live again for ${durationDays} days.`);
       setTimeout(() => setRenewalSuccessMsg(null), 8000);
     } catch (err: any) {
       console.error(err);
@@ -316,6 +342,90 @@ export default function MyListingsView() {
     });
   };
 
+  if (renewalPanelListing) {
+    const rows = [
+      { months: 1, days: 30, naira: 3690, tokens: 200 },
+      { months: 2, days: 60, naira: 6900, tokens: 380 },
+      { months: 3, days: 90, naira: 9900, tokens: 540 },
+      { months: 6, days: 180, naira: 18000, tokens: 990 },
+      { months: 12, days: 365, naira: 33000, tokens: 1800 }
+    ];
+
+    return (
+      <div className="fixed inset-0 z-50 bg-brand-gray dark:bg-[#1a1a1f] p-6 overflow-y-auto animate-fadeIn flex flex-col justify-start">
+        <div className="max-w-3xl w-full mx-auto bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 p-8 shadow-brutal-lg">
+          <div className="flex justify-between items-center border-b-4 border-brand-black dark:border-zinc-700 pb-4 mb-6">
+            <h2 id="renewal-options-title" className="text-3xl font-display font-black tracking-tighter uppercase dark:text-white">RENEWAL OPTIONS</h2>
+            <button
+              onClick={() => setRenewalPanelListing(null)}
+              className="brutalist-button-black py-2 px-4 text-xs font-black uppercase cursor-pointer"
+            >
+              CLOSE
+            </button>
+          </div>
+
+          <div className="p-4 bg-zinc-50 dark:bg-zinc-800 border-2 border-dashed border-brand-black dark:border-zinc-700 mb-6 font-bold uppercase text-xs space-y-1 dark:text-zinc-300">
+            <div><span className="text-zinc-400">Property:</span> {renewalPanelListing.title}</div>
+            <div><span className="text-zinc-400">Reference ID:</span> {renewalPanelListing.id}</div>
+            <div><span className="text-zinc-400">Location:</span> {renewalPanelListing.location}</div>
+          </div>
+
+          <table className="w-full border-4 border-brand-black dark:border-zinc-700 mb-6 text-left border-collapse">
+            <thead>
+              <tr className="bg-zinc-100 dark:bg-zinc-800 border-b-4 border-brand-black dark:border-zinc-700 font-display font-black text-xs uppercase text-zinc-700 dark:text-zinc-300">
+                <th className="p-3 border-r-2 border-brand-black dark:border-zinc-700">Duration</th>
+                <th className="p-3 border-r-2 border-brand-black dark:border-zinc-700">Naira Price</th>
+                <th className="p-3 border-r-2 border-brand-black dark:border-zinc-700">Token Price</th>
+                <th className="p-3">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y-2 divide-brand-black dark:divide-zinc-700 font-bold uppercase text-xs">
+              {rows.map((row) => (
+                <tr key={row.months} className="bg-white dark:bg-zinc-900 text-brand-black dark:text-white hover:bg-zinc-50 dark:hover:bg-zinc-850">
+                  <td className="p-3 border-r-2 border-brand-black dark:border-zinc-700 font-mono font-black">
+                    {row.months} Month{row.months > 1 ? 's' : ''} ({row.days} Days)
+                  </td>
+                  <td className="p-3 border-r-2 border-brand-black dark:border-zinc-700 font-mono font-bold">
+                    ₦{row.naira.toLocaleString()}
+                  </td>
+                  <td className="p-3 border-r-2 border-brand-black dark:border-zinc-700 font-mono text-amber-500 font-black">
+                    {row.tokens} Tokens
+                  </td>
+                  <td className="p-3">
+                    <div className="flex gap-2">
+                       <button
+                         onClick={async () => {
+                           await handleRenewListing(renewalPanelListing.id, renewalPanelListing.title, 'naira', row.days, row.naira, row.tokens);
+                           setRenewalPanelListing(null);
+                         }}
+                         className="brutalist-button-teal text-[9px] py-1 px-3 font-black uppercase cursor-pointer"
+                       >
+                         Naira Select
+                       </button>
+                       <button
+                         onClick={async () => {
+                           await handleRenewListing(renewalPanelListing.id, renewalPanelListing.title, 'tokens', row.days, row.naira, row.tokens);
+                           setRenewalPanelListing(null);
+                         }}
+                         className="bg-amber-400 hover:bg-amber-300 text-black border-2 border-black text-[9px] font-black uppercase px-3 py-1 shadow-brutal-xs transition-all cursor-pointer"
+                       >
+                         Token Select
+                       </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <p className="text-[10px] text-brand-red font-black uppercase tracking-tight italic">
+            * Renewals do not include the 7-day new listing bonus.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-6">
       {feedbackNotice && (
@@ -341,12 +451,22 @@ export default function MyListingsView() {
           <h3 className="text-2xl font-display font-black uppercase italic dark:text-gray-100">
             My Listings
           </h3>
-          <button
-            onClick={() => setIsListingFlow(true)}
-            className="bg-brand-black text-white px-4 py-2 border-2 border-brand-black hover:bg-brand-teal hover:text-brand-black transition-all shadow-brutal-sm hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none flex items-center gap-2 text-xs font-black uppercase tracking-wide animate-pulse"
-          >
-            <PlusCircle size={14} /> List New Property
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsArchivesOpen(true)}
+              className="bg-transparent text-zinc-600 dark:text-zinc-400 hover:text-brand-black dark:hover:text-white px-3 py-1.5 border-2 border-zinc-300 dark:border-zinc-700 hover:border-brand-black dark:hover:border-zinc-500 text-[10px] font-black uppercase tracking-wider flex items-center gap-1 transition-all cursor-pointer font-bold"
+            >
+              <Archive size={12} />
+              ARCHIVES ({listingRequests.filter(r => r.status === 'Archived').length})
+            </button>
+            <button
+              onClick={() => setIsListingFlow(true)}
+              className="bg-brand-black text-white px-4 py-2 border-2 border-brand-black hover:bg-brand-teal hover:text-brand-black transition-all shadow-brutal-sm hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none flex items-center gap-2 text-xs font-black uppercase tracking-wide animate-pulse"
+            >
+              <PlusCircle size={14} /> List New Property
+            </button>
+          </div>
         </div>
 
         {/* Pipeline Status Summary counts */}
@@ -585,54 +705,16 @@ export default function MyListingsView() {
               );
             }
 
-            if (req.status === 'Inactive') {
-              const renewalDate = req.monthlyFeeExpiresAt ? new Date(req.monthlyFeeExpiresAt).toLocaleDateString() : 'recently';
-              return (
-                <div
-                  key={req.id}
-                  className="bg-amber-50/50 dark:bg-amber-950/10 border-4 border-amber-400 p-6 shadow-brutal-xs relative overflow-hidden transition-all duration-300"
-                >
-                  <div className="flex justify-between items-start mb-3">
-                    <span className="text-[8px] font-black uppercase tracking-widest bg-amber-400 text-black px-1.5 py-0.5 border border-black italic">
-                      LISTING INACTIVE — RENEWAL REQUIRED
-                    </span>
-                    <span className="text-[8px] font-black uppercase tracking-widest text-zinc-400">
-                      Ref: {req.id.slice(0, 8)}
-                    </span>
-                  </div>
-                  <h3 className="font-display font-black uppercase text-lg leading-tight dark:text-brand-gray mb-1">
-                    {req.title}
-                  </h3>
-                  <p className="text-xs text-zinc-500 font-bold uppercase tracking-tight py-2 mb-4 leading-relaxed">
-                    Your listing expired on {renewalDate}. Renew to make it visible on the marketplace again.
-                  </p>
-                  <div className="flex gap-4">
-                    <button
-                      onClick={() => handleRenewListing(req.id, req.title, 'naira')}
-                      className="brutalist-button-teal text-[10px] py-2 px-4 font-black uppercase"
-                    >
-                      RENEW — ₦3,690
-                    </button>
-                    <button
-                      onClick={() => handleRenewListing(req.id, req.title, 'tokens')}
-                      className="bg-amber-400 hover:bg-amber-300 text-black border-2 border-black tracking-wider text-[10px] font-black uppercase px-4 shadow-brutal-xs transition-all active:translate-y-0.5"
-                    >
-                      RENEW — 200 TOKENS
-                    </button>
-                  </div>
-                </div>
-              );
-            }
-
             return (
               <div
                 key={req.id}
                 className={cn(
                   "bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 p-4 shadow-brutal-sm relative overflow-hidden transition-all duration-300",
-                  (isExpired || req.status === "Archived") &&
+                  ((isExpired && req.status !== 'Inactive') || req.status === "Archived") &&
                     "opacity-75 grayscale",
                 )}
               >
+                <div className={cn(req.status === 'Inactive' && "opacity-50 grayscale pointer-events-none select-none")}>
                 {/* Metrics Overlay */}
                 <AnimatePresence>
                   {isViewingMetrics && (
@@ -1031,9 +1113,9 @@ export default function MyListingsView() {
                         </button>
                         <button
                           onClick={async () => {
-                            if (confirm("Are you sure you want to delete this listing permanently? This cannot be undone.")) {
+                            if (confirm("Are you sure you want to delete this listing? It will be archived and removed from search.")) {
                               try {
-                                await deleteDoc(doc(db, "listingRequests", req.id));
+                                await deleteListing(req.id);
                               } catch (err: any) {
                                 console.error("Error deleting listing:", err);
                                 alert("Failed to delete processing: " + (err.message || err));
@@ -1320,7 +1402,7 @@ export default function MyListingsView() {
                                 });
 
                                 // Send Notification to Admins
-                                const adminsQuery = query(collection(db, 'users'), where('role', '==', 'Admin'));
+                                const adminsQuery = query(collection(db, 'users'), where('userStates', 'array-contains', 'Admin'));
                                 const snapshot = await getDocs(adminsQuery);
                                 const dispatchPromises: Promise<any>[] = [];
                                 snapshot.forEach(docSnap => {
@@ -1429,6 +1511,38 @@ export default function MyListingsView() {
                         </div>
                       </div>
                     ))}
+                  </div>
+                )}
+                </div>
+
+                {req.status === 'Inactive' && (
+                  <div className="mt-4 pt-4 border-t-4 border-brand-black dark:border-zinc-700 bg-amber-50/10 dark:bg-zinc-805/20 p-4 space-y-3 relative z-10 animate-fadeIn">
+                    <p className="text-xs font-bold text-zinc-850 dark:text-zinc-200 uppercase tracking-tight">
+                      It seems your listing left the market, wanna quickly renew?
+                    </p>
+                    <div className="flex flex-wrap gap-2 items-center">
+                      <button
+                        id={`btn-renew-naira-${req.id}`}
+                        onClick={() => handleRenewListing(req.id, req.title, 'naira', 30, 3690, 200)}
+                        className="brutalist-button-teal text-[10px] py-1.5 px-3 font-black uppercase cursor-pointer"
+                      >
+                        ₦3,690 / 1 month
+                      </button>
+                      <button
+                        id={`btn-renew-tokens-${req.id}`}
+                        onClick={() => handleRenewListing(req.id, req.title, 'tokens', 30, 3690, 200)}
+                        className="bg-amber-400 hover:bg-amber-300 text-black border-2 border-black tracking-wider text-[10px] font-black uppercase px-3 py-1.5 shadow-brutal-xs transition-all active:translate-y-0.5 cursor-pointer"
+                      >
+                        200 tokens / 1 month
+                      </button>
+                      <button
+                        id={`btn-renew-more-${req.id}`}
+                        onClick={() => setRenewalPanelListing(req)}
+                        className="text-[10px] text-zinc-500 hover:text-brand-black dark:hover:text-white font-extrabold uppercase ml-auto tracking-normal hover:underline cursor-pointer"
+                      >
+                        More options →
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1819,6 +1933,113 @@ export default function MyListingsView() {
                   </div>
                 </form>
               )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isArchivesOpen && (
+          <div className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-xs font-sans">
+            <motion.div
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 200 }}
+              className="w-full max-w-md h-full bg-zinc-50 dark:bg-zinc-905 border-l-4 border-brand-black p-6 flex flex-col justify-between shadow-2xl relative overflow-y-auto"
+            >
+              <div>
+                <div className="flex justify-between items-center mb-6">
+                  <div>
+                    <h3 className="text-2xl font-display font-black uppercase italic dark:text-white flex items-center gap-2">
+                      <Archive className="text-brand-teal" size={24} /> Archived Listings
+                    </h3>
+                    <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
+                      Archived, Deletion, and Market Out-takes
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setIsArchivesOpen(false)}
+                    className="p-2 border-2 border-brand-black dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+
+                {(() => {
+                  const items = listingRequests.filter((r) => r.status === 'Archived');
+                  if (items.length === 0) {
+                    return (
+                      <div className="py-12 text-center border-4 border-dashed border-zinc-200 dark:border-zinc-800">
+                        <Archive size={32} className="mx-auto text-zinc-300 dark:text-zinc-700 mb-2" />
+                        <span className="text-xs text-zinc-400 font-bold uppercase tracking-wider">
+                          NO ARCHIVED LISTINGS FOUND
+                        </span>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="space-y-4">
+                      {items.map((listing) => {
+                        const archiveReason = listing.archiveReason || 'Expired';
+                        const archivedAtString = (listing as any).archivedAt 
+                          ? new Date((listing as any).archivedAt).toLocaleDateString()
+                          : listing.lastUpdated 
+                            ? new Date(listing.lastUpdated).toLocaleDateString()
+                            : 'N/A';
+
+                        let reasonColor = 'bg-zinc-400';
+                        if (archiveReason === 'Sold') reasonColor = 'bg-emerald-500';
+                        else if (archiveReason === 'Deleted') reasonColor = 'bg-zinc-600';
+                        else if (archiveReason === 'Rejected') reasonColor = 'bg-brand-red';
+                        else if (archiveReason === 'Expired') reasonColor = 'bg-amber-500';
+
+                        return (
+                          <div
+                            key={listing.id}
+                            className="bg-white dark:bg-zinc-850 border-2 border-brand-black dark:border-transparent p-4 shadow-brutal-xs flex flex-col gap-2"
+                          >
+                            <div className="flex justify-between items-start">
+                              <span className={`text-[8px] font-black uppercase text-white px-2 py-0.5 ${reasonColor}`}>
+                                {archiveReason}
+                              </span>
+                              <span className="text-[9px] font-mono text-zinc-400">
+                                {archivedAtString}
+                              </span>
+                            </div>
+
+                            <div>
+                              <h4 className="text-sm font-black text-zinc-900 dark:text-white uppercase tracking-tight">
+                                {listing.title}
+                              </h4>
+                              <p className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium flex items-center gap-1 mt-0.5">
+                                <MapPin size={10} className="text-brand-teal" /> {listing.location}
+                              </p>
+                            </div>
+
+                            <div className="flex justify-between items-center text-[10px] font-black uppercase pt-1 border-t border-zinc-100 dark:border-zinc-800 mt-1">
+                              <span className="text-zinc-400">Valuation:</span>
+                              <span className="text-brand-black dark:text-brand-teal">
+                                {new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', maximumFractionDigits: 0 }).format(listing.price)}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </div>
+
+              <div className="mt-8 pt-4 border-t-2 border-zinc-200 dark:border-zinc-800">
+                <button
+                  onClick={() => setIsArchivesOpen(false)}
+                  className="w-full brutalist-button-teal py-3 text-xs font-black uppercase tracking-wider text-center block"
+                >
+                  CLOSE ARCHIVES WINDOW
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

@@ -246,6 +246,9 @@ export interface ListingRequest {
   bidWindowOpensAt?: string;
   bidWindowExpiresAt?: string;
   propertyChangeRequest?: PropertyChangeRequest;
+  listingDurationDays?: number;
+  listingTotalDays?: number;
+  archiveReason?: 'Sold' | 'Deleted' | 'Rejected' | 'Expired';
 }
 
 export interface Message {
@@ -295,6 +298,9 @@ export interface UserPreferences {
   defaultListingType: 'All' | 'Sale' | 'Rent';
 }
 
+export type UserState = 'Default' | 'Buyer' | 'Seller' | 'Agent' | 'Admin';
+export type UserStateSet = Set<UserState>;
+
 export interface User {
   id: string;
   name: string; // The unique display name
@@ -314,7 +320,7 @@ export interface User {
     headwear: string;
   };
   savedProperties: string[];
-  isAgent: boolean;
+  isAgent?: boolean;
   isSubscriber: boolean;
   ownedAvatars?: string[];
   equippedAvatarId?: string;
@@ -329,7 +335,12 @@ export interface User {
   totalReviews?: number;
   tokens: number;
   transactions?: Transaction[];
-  role: 'Buyer' | 'Seller' | 'Agent' | 'Admin';
+  userStates?: UserState[];
+  activeInspectionId?: string;
+  buyerStateExpiresAt?: string;
+  phoneVerifiedAt?: string;
+  agentApplicationStatus?: 'None' | 'Pending' | 'Approved' | 'Rejected';
+  dateOfBirth?: string;
   agentTier?: AgentTier;
   agentRegNumber?: string;
   agentVerificationStatus?: 'Unverified' | 'Pending' | 'Verified' | 'Rejected';
@@ -365,7 +376,7 @@ export interface Dispute {
   listingId: string;
   propertyTitle: string;
   raisedBy: string;
-  raisedByRole: 'Buyer' | 'Seller' | 'Agent';
+  raisedByState: 'Buyer' | 'Seller' | 'Agent';
   againstUserId: string;
   type: 'property_mismatch' | 'off_platform_deal' | 'inspection_no_show' | 'fraud' | 'other';
   description: string;

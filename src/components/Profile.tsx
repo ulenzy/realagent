@@ -27,12 +27,13 @@ import {
   Sparkles,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { cn } from "../lib/utils";
+import { cn, hasState } from "../lib/utils";
 import { ListingRequest, ListingStatus, User as UserType } from "../types";
 import { Coins, Shield, Check } from "lucide-react";
 import { TOKEN_BUNDLES, TOKEN_NAIRA_RATE } from "../constants/fees";
 import { mockProperties } from "../data/mockListings";
 import { PropertyCard } from "./Marketplace";
+import AgentApplicationFlow from "./AgentApplicationFlow";
 import {
   formatCurrency,
   parseFormattedNumber,
@@ -112,7 +113,11 @@ export default function Profile({
     | "Preferences"
     | "Account Settings"
     | "Support Center"
+    | "BecomeAgent"
   >(initialView);
+
+  const [showTermsModal, setShowTermsModal] = useState(false);
+  const [agreedTerms, setAgreedTerms] = useState(false);
 
   useEffect(() => {
     setActiveView(initialView);
@@ -407,7 +412,6 @@ export default function Profile({
     avatarSeed: user.avatarSeed || "User",
     avatarUrl: user.avatarUrl || "",
     avatarTier: user.avatarTier || "Standard",
-    role: user.role || "Buyer",
     linkedin: user.linkedin || "",
     onlineHours: user.onlineHours || "Mon,Tue,Wed,Thu,Fri|09:00-17:00",
     specializationArea: user.specializationArea || "",
@@ -898,7 +902,7 @@ export default function Profile({
   };
 
   useEffect(() => {
-    if (user && user.role === 'Admin') {
+    if (user && hasState(user, 'Admin')) {
       loadPendingKycUsers();
     }
   }, [user]);
@@ -993,41 +997,39 @@ export default function Profile({
   };
 
   const renderRoleTierBadges = (u: any) => {
+    const statesToDisplay = u.userStates || [];
+    const filteredStates = statesToDisplay.filter((s: string) => s !== 'Default' || statesToDisplay.length === 1);
+    
+    const getColorClass = (state: string) => {
+      switch (state) {
+        case 'Default':
+          return 'bg-zinc-400 text-brand-black border-brand-black';
+        case 'Buyer':
+          return 'bg-blue-400 text-brand-black border-brand-black';
+        case 'Seller':
+          return 'bg-brand-teal text-brand-black border-brand-black';
+        case 'Agent':
+          return 'bg-amber-400 text-brand-black border-brand-black';
+        case 'Admin':
+          return 'bg-brand-black text-white border-zinc-900 dark:border-zinc-700';
+        default:
+          return 'bg-zinc-400 text-brand-black border-brand-black';
+      }
+    };
+
     return (
-      <div className="flex flex-wrap gap-2 items-center my-2">
-        {u.role === "Buyer" && (
-          <span className="px-2.5 py-1 bg-zinc-200 text-zinc-950 font-black text-[9px] uppercase tracking-wider border-2 border-brand-black shadow-brutal-xs">
-            Buyer
-          </span>
-        )}
-        {u.role === "Seller" && (
-          <span className="px-2.5 py-1 bg-blue-500 text-white font-black text-[9px] uppercase tracking-wider border-2 border-brand-black shadow-brutal-xs">
-            Property Owner
-          </span>
-        )}
-        {u.role === "Agent" && (
-          <>
-            {u.agentTier === "Verified Professional" ? (
-              <>
-                <span className="px-2.5 py-1 bg-brand-teal text-brand-black font-black text-[9px] uppercase tracking-wider border-2 border-brand-black flex items-center gap-1 shadow-brutal-xs">
-                  Verified Professional
-                  {u.agentVerificationStatus === "Verified" && (
-                    <ShieldCheck size={12} className="text-brand-black" />
-                  )}
-                </span>
-                {u.agentVerificationStatus === "Pending" && (
-                  <span className="px-2.5 py-1 bg-amber-400 text-brand-black font-black text-[9px] uppercase tracking-wider border-2 border-brand-black shadow-brutal-xs">
-                    Verification Pending
-                  </span>
-                )}
-              </>
-            ) : (
-              <span className="px-2.5 py-1 bg-zinc-400 text-brand-black font-black text-[9px] uppercase tracking-wider border-2 border-brand-black shadow-brutal-xs">
-                Platform Agent
-              </span>
+      <div className="flex flex-wrap gap-2 items-center my-2 animate-feedEntry">
+        {filteredStates.map((state: string) => (
+          <span 
+            key={state} 
+            className={cn(
+              "px-2.5 py-1 font-black text-[9px] uppercase tracking-wider border-2 shadow-brutal-xs",
+              getColorClass(state)
             )}
-          </>
-        )}
+          >
+            {state === 'Seller' ? 'Property Owner' : state}
+          </span>
+        ))}
       </div>
     );
   };
@@ -1174,6 +1176,15 @@ export default function Profile({
               <span>Back to Workspace</span>
             </button>
           </div>
+          {activeView === "BecomeAgent" && (
+            <AgentApplicationFlow 
+              onBack={() => setActiveView("main")} 
+              onSubmitted={() => {
+                setActiveView("main");
+              }}
+            />
+          )}
+
           {activeView === "Wallet" && (
             <div className="flex flex-col gap-6 relative">
               {purchaseSuccess && <ConfettiEffect />}
@@ -1510,30 +1521,7 @@ export default function Profile({
                           placeholder="Tell us about yourself..."
                         />
                       </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="group">
-                          <label className="text-[10px] font-black uppercase text-zinc-400 tracking-[0.2em] mb-1 block">
-                            Account Role
-                          </label>
-                          <select
-                            value={profileEditData.role}
-                            onChange={(e) =>
-                              setProfileEditData({
-                                ...profileEditData,
-                                role: e.target.value as any,
-                              })
-                            }
-                            className="brutalist-input h-10 text-xs bg-[#dadcd8] dark:bg-zinc-800 border-zinc-700 text-brand-black dark:text-white w-full"
-                          >
-                            <option value="Buyer">
-                              Property Buyer / Investor
-                            </option>
-                            <option value="Agent">Real Estate Agent</option>
-                            <option value="Developer">
-                              Property Developer
-                            </option>
-                          </select>
-                        </div>
+                      <div className="grid grid-cols-1 gap-4">
                         <div className="group">
                           <label className="text-[10px] font-black uppercase text-zinc-400 tracking-[0.2em] mb-1 block">
                             Gender Identity
@@ -2818,6 +2806,69 @@ export default function Profile({
                     Secure credential rotation system offline. Please contact administrator.
                   </div>
                 )}
+
+                {/* Sub: Phone Number Change with Cooldown */}
+                <div className="flex justify-between items-center py-1 border-t border-dashed border-zinc-200 dark:border-zinc-800 pt-3 mt-1">
+                  <div className="flex flex-col text-left">
+                    <span className="text-xs font-bold uppercase tracking-tight text-neutral-600 dark:text-neutral-300">Change Phone Number</span>
+                    <span className="text-[10px] text-zinc-400 dark:text-zinc-500">
+                      {user.phoneNumber ? `Current number: ${user.phoneNumber}` : "No phone number configured"}
+                    </span>
+                  </div>
+                  <div>
+                    {(() => {
+                      if (!user.phoneVerifiedAt) {
+                        return (
+                          <button
+                            onClick={() => {
+                              setKycStage(2);
+                              setActiveModal("Phone Verification Flow");
+                            }}
+                            className="bg-brand-teal text-brand-black border-2 border-brand-black px-4 py-1.5 font-display text-[9px] font-black uppercase tracking-widest transition-all shadow-brutal-xs active:translate-y-0.5 cursor-pointer font-black"
+                          >
+                            Verify Phone Number
+                          </button>
+                        );
+                      }
+
+                      const cooldownMs = 14 * 24 * 60 * 60 * 1000;
+                      const verifiedAt = new Date(user.phoneVerifiedAt).getTime();
+                      const cooldownExpires = verifiedAt + cooldownMs;
+                      const isCooldownActive = Date.now() < cooldownExpires;
+
+                      if (isCooldownActive) {
+                        const daysRemaining = Math.max(1, Math.ceil((cooldownExpires - Date.now()) / (24 * 60 * 60 * 1000)));
+                        const dateString = new Date(verifiedAt).toLocaleDateString();
+                        const canChangeDateString = new Date(cooldownExpires).toLocaleDateString();
+                        return (
+                          <div className="flex flex-col items-end gap-1 max-w-md">
+                            <span className="text-[8px] font-black uppercase text-brand-red tracking-wider bg-red-50 dark:bg-red-950/20 px-2 py-1 border border-brand-red/25 text-right font-bold">
+                              Your phone number was verified on {dateString}. You can change it after {canChangeDateString} ({daysRemaining} days remaining).
+                            </span>
+                            <button
+                              disabled
+                              className="opacity-50 cursor-not-allowed bg-zinc-200 dark:bg-zinc-800 border-2 border-zinc-350 dark:border-zinc-700 px-4 py-1.5 font-display text-[9px] font-black uppercase tracking-widest text-zinc-400 font-bold"
+                            >
+                              CHANGE PHONE NUMBER (COOLDOWN)
+                            </button>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <button
+                          onClick={() => {
+                            setKycStage(2);
+                            setActiveModal("Phone Verification Flow");
+                          }}
+                          className="bg-zinc-100 dark:bg-zinc-800 border-2 border-brand-black dark:border-zinc-700 hover:bg-brand-teal hover:text-brand-black px-4 py-1.5 font-display text-[9px] font-black uppercase tracking-widest transition-all shadow-brutal-xs active:translate-y-0.5 text-brand-black dark:text-white font-black cursor-pointer font-black"
+                        >
+                          Change Phone Number
+                        </button>
+                      );
+                    })()}
+                  </div>
+                </div>
               </div>
 
               {/* Sub: Privacy */}
@@ -3030,7 +3081,7 @@ export default function Profile({
                         <div className="space-y-3 flex-1">
                           <div className="flex items-center gap-2">
                             <span className="text-[9px] font-black uppercase tracking-widest bg-amber-400 text-black px-1.5 py-0.5 border border-black italic">
-                              {pendingUser.role || "User"}
+                              {(pendingUser.userStates || []).filter((s: string) => s !== 'Default').join(', ') || "Default"}
                             </span>
                             <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400 font-mono">
                               ID: {pendingUser.id.slice(0, 10)}
@@ -3555,8 +3606,117 @@ export default function Profile({
         </motion.div>
       )}
 
+      {/* Become an Agent CTA Card */}
+      {!hasState(user, "Agent") && (
+        <section className="bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 p-6 shadow-aggressive flex flex-col gap-4">
+          <div className="flex items-center gap-2 border-b-2 border-brand-black pb-3">
+            <Briefcase className="text-brand-teal" size={24} />
+            <h3 className="text-xl font-display font-black uppercase">
+              Become a Platform Agent
+            </h3>
+          </div>
+          <p className="text-xs uppercase font-bold text-zinc-500">
+            Earn tokens, manage direct buyer bids, conduct secure property verifications, and grow your local network on the RealAgents platform.
+          </p>
+
+          {user.agentApplicationStatus === 'Pending' ? (
+            <div className="p-3 bg-amber-400 text-black border-2 border-brand-black font-black uppercase text-xs tracking-widest text-center animate-pulse">
+              APPLICATION UNDER REVIEW
+            </div>
+          ) : user.agentApplicationStatus === 'Approved' ? (
+            <div className="p-3 bg-emerald-500 text-black border-2 border-brand-black font-black uppercase text-xs tracking-widest text-center">
+              APPLICATION APPROVED
+            </div>
+          ) : (
+            <button
+              id="btn-become-agent"
+              onClick={() => {
+                setShowTermsModal(true);
+              }}
+              className="brutalist-button-teal py-4 text-xs font-black uppercase tracking-widest text-center cursor-pointer h-auto w-full"
+            >
+              BECOME AN AGENT
+            </button>
+          )}
+        </section>
+      )}
+
+      {/* Full-screen Agent Terms & Conditions Modal */}
+      <AnimatePresence>
+        {showTermsModal && (
+          <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-brand-black/60 backdrop-blur-md">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 p-6 shadow-aggressive max-w-lg w-full flex flex-col gap-4 text-left"
+            >
+              <div className="border-b-4 border-brand-black pb-3">
+                <h4 className="text-xl font-display font-black uppercase italic tracking-tight">
+                  RealAgents Agent Terms
+                </h4>
+                <p className="text-[10px] font-black uppercase text-zinc-400">
+                  Please read and agree to terms to unlock professional verification
+                </p>
+              </div>
+
+              <div className="bg-zinc-100 dark:bg-zinc-850 p-4 border-2 border-brand-black max-h-48 overflow-y-auto font-mono text-[11px] leading-relaxed text-zinc-700 dark:text-zinc-200">
+                <p className="font-extrabold mb-2 uppercase text-brand-black dark:text-white">REALAGENTS DEED OF PROFESSIONAL CONDUCT</p>
+                <p className="mb-2">By registering as a Platform Agent on RealAgents, you agree to:</p>
+                <ul className="list-decimal list-inside space-y-1">
+                  <li>Maintain professional standard of communication and conduct with all users.</li>
+                  <li>Only submit genuine bids and listing details.</li>
+                  <li>Conduct in-person property verifications diligently.</li>
+                  <li>Keep user data private and secure.</li>
+                  <li>Pay platform commission on deals closed via the marketplace.</li>
+                </ul>
+              </div>
+
+              <label className="flex items-start gap-2.5 cursor-pointer select-none py-1">
+                <input
+                  id="agent-terms-checkbox"
+                  type="checkbox"
+                  checked={agreedTerms}
+                  onChange={(e) => setAgreedTerms(e.target.checked)}
+                  className="w-4.5 h-4.5 border-2 border-brand-black checked:bg-brand-teal accent-brand-black mt-0.5"
+                />
+                <span className="text-[10px] font-black uppercase text-brand-black dark:text-gray-200 leading-tight">
+                  I have read and agree to the RealAgents Agent Terms
+                </span>
+              </label>
+
+              <div className="flex gap-2 pt-2 border-t-2 border-zinc-200 dark:border-zinc-800">
+                <button
+                  id="btn-cancel-terms"
+                  type="button"
+                  onClick={() => {
+                    setShowTermsModal(false);
+                    setAgreedTerms(false);
+                  }}
+                  className="flex-1 py-3 border-2 border-brand-black text-[10px] font-black uppercase tracking-wider hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all cursor-pointer bg-white"
+                >
+                  Cancel
+                </button>
+                <button
+                  id="btn-proceed-agent-app"
+                  type="button"
+                  disabled={!agreedTerms}
+                  onClick={() => {
+                    setShowTermsModal(false);
+                    setActiveView("BecomeAgent");
+                  }}
+                  className="flex-1 py-3 bg-brand-teal text-brand-black border-2 border-brand-black text-[10px] font-black uppercase tracking-wider shadow-brutal-xs hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all disabled:opacity-50 cursor-pointer"
+                >
+                  PROCEED TO APPLICATION
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Agent Credentials Section */}
-      {user.role === "Agent" && (
+      {hasState(user, "Agent") && (
         <section className="bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 p-6 shadow-aggressive flex flex-col gap-4">
           <div className="flex items-center gap-2 border-b-2 border-brand-black pb-3">
             <Briefcase className="text-brand-teal" size={24} />
@@ -3699,7 +3859,7 @@ export default function Profile({
       )}
 
       {/* Buyer Quick Access Panels */}
-      {user.role === "Buyer" && (
+      {hasState(user, "Buyer") && (
         <section className="grid grid-cols-2 gap-4 select-none">
           <button
             onClick={() => handleAction("Saved Properties")}
@@ -3744,7 +3904,7 @@ export default function Profile({
       )}
 
       {/* Quick Actions Grid */}
-      {user.role === "Seller" && (
+      {hasState(user, "Seller") && (
         <section className="grid gap-4 grid-cols-1">
           <ActionButton
             icon={<PlusCircle className="text-brand-red" />}
@@ -3757,7 +3917,7 @@ export default function Profile({
 
       {/* Leaderboard Standing & Discovery Section */}
       <section id="profile-leaderboard-section" className="flex flex-col gap-4">
-        {user.role === "Agent" ? (
+        {hasState(user, "Agent") ? (
           <div className="pl-2">
             <h3 className="text-xs font-display font-black uppercase text-zinc-400 tracking-widest">
               YOUR LEADERSHIP STANDING
@@ -3791,14 +3951,14 @@ export default function Profile({
             label="Customize Profile"
             onClick={() => handleAction("Customize Profile")}
           />
-          {user.role !== "Buyer" && (
+          {!hasState(user, "Buyer") && (
             <ListOption
               icon={<Heart size={18} />}
               label="Saved Properties"
               onClick={() => handleAction("Saved Properties")}
             />
           )}
-          {user.role !== "Buyer" && (
+          {!hasState(user, "Buyer") && (
             <ListOption
               icon={<History size={18} />}
               label="Viewed History"
@@ -4421,6 +4581,99 @@ export default function Profile({
                           )}
                         </div>
                       )}
+                  </div>
+                ) : activeModal === "Phone Verification Flow" || activeModal === "Phone Cooldown Verification" ? (
+                  <div className="space-y-4">
+                    <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-tight leading-normal mb-4">
+                      Complete your SMS configuration verification below to authorize phone number changes or updates.
+                    </p>
+
+                    <div className="space-y-4">
+                      <div className="group font-sans">
+                        <label className="text-[8px] font-black uppercase text-zinc-400 tracking-widest mb-1 block font-bold">
+                          Phone Number (with dial code, e.g. +234...)
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            type="tel"
+                            disabled={isOTPSent && isPhoneVerified}
+                            value={phoneNumber}
+                            onChange={(e) => setPhoneNumber(e.target.value)}
+                            className="brutalist-input h-10 text-xs flex-1 bg-white dark:bg-zinc-800 border-2"
+                            placeholder="+2348012345678"
+                          />
+                          <button
+                            type="button"
+                            disabled={isPhoneVerified}
+                            onClick={handleSendOTP}
+                            className="bg-brand-black hover:bg-zinc-850 dark:bg-zinc-800 text-white px-3 border-2 border-brand-black text-[10px] font-black uppercase shadow-brutal-xs cursor-pointer font-black shrink-0"
+                          >
+                            {isOTPSent ? "RESEND" : "SEND OTP"}
+                          </button>
+                        </div>
+                      </div>
+
+                      {isOTPSent && !isPhoneVerified && (
+                        <div className="group animate-fade-in space-y-1">
+                          <label className="text-[8px] font-black uppercase text-zinc-400 tracking-widest mb-1 block font-bold">
+                            Enter 6-Digit OTP Code
+                          </label>
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              value={otpCode}
+                              onChange={(e) => setOtpCode(e.target.value)}
+                              className="brutalist-input h-10 text-center text-xs tracking-[0.5em] font-mono flex-1 bg-white dark:bg-zinc-800 border-2"
+                              placeholder="123456"
+                              maxLength={6}
+                            />
+                            <button
+                              type="button"
+                              onClick={handleVerifyOTP}
+                              className="brutalist-button-teal px-5 h-10 text-[10px] cursor-pointer"
+                            >
+                              VERIFY OTP
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {phoneError && (
+                        <p className="text-[10px] font-black text-brand-red uppercase bg-red-50 dark:bg-red-950/20 p-2.5 border border-brand-red/30">
+                          {phoneError}
+                        </p>
+                      )}
+
+                      {isPhoneVerified && (
+                        <div className="space-y-3 pt-2">
+                          <div className="p-3 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-500/30 text-emerald-600 dark:text-emerald-405 text-xs font-black uppercase flex items-center gap-2">
+                            <CheckCircle size={14} className="shrink-0" />
+                            <span>Phone number verified!</span>
+                          </div>
+                          <button
+                            onClick={async () => {
+                              try {
+                                await updateUser({
+                                  phoneNumber: phoneNumber,
+                                  phoneVerified: true,
+                                  phoneVerifiedAt: new Date().toISOString()
+                                });
+                                setPhoneError(null);
+                                setIsOTPSent(false);
+                                setOtpCode("");
+                                setActiveModal(null);
+                              } catch (err: any) {
+                                console.error(err);
+                                setPhoneError("Failed to update profile: " + err.message);
+                              }
+                            }}
+                            className="w-full brutalist-button-teal py-3 text-xs font-black uppercase tracking-wider"
+                          >
+                            Update Profile Number
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ) : activeModal === "Additional Listing Cost" ? (
                   <div className="p-8 flex flex-col items-center justify-center min-h-[200px] text-center gap-4">

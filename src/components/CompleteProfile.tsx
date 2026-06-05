@@ -37,7 +37,8 @@ export default function CompleteProfile() {
   const [mockOTPCode, setMockOTPCode] = useState('123456');
   const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
 
-  const [fullName, setFullName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [surname, setSurname] = useState('');
   const [selectedRole, setSelectedRole] = useState<'Buyer' | 'Seller' | 'Agent'>('Buyer');
   const [gender, setGender] = useState<'Male' | 'Female' | 'Other' | 'Prefer not to say'>('Prefer not to say');
   const [isAgeVerified, setIsAgeVerified] = useState(false);
@@ -74,7 +75,13 @@ export default function CompleteProfile() {
           const cleanPhone = existingPhone.replace('+234', '');
           setPhone(cleanPhone);
         }
-        setFullName(existingName);
+        
+        const nameParts = existingName.trim().split(/\s+/);
+        const fName = nameParts[0] || '';
+        const lName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
+        setFirstName(fName);
+        setSurname(lName);
+
         setSelectedRole(existingRole);
         setGender(existingGender);
 
@@ -270,8 +277,8 @@ export default function CompleteProfile() {
       setError('A verified phone number is required to proceed.');
       return;
     }
-    if (missingFlags.fullName && !fullName.trim()) {
-      setError('Your full name is required.');
+    if (missingFlags.fullName && (!firstName.trim() || !surname.trim())) {
+      setError('Surname and first name are required.');
       return;
     }
     if (!isAgeVerified) {
@@ -283,27 +290,25 @@ export default function CompleteProfile() {
     setError(null);
 
     try {
-      const nameParts = fullName.trim().split(/\s+/);
-      const firstName = nameParts[0] || '';
-      const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
+      const combinedFullName = `${firstName.trim()} ${surname.trim()}`.trim();
       const formattedPhone = `+234${phone}`;
 
       const updates: any = {
         id: firebaseUser.uid,
-        name: fullName,
-        firstName,
-        lastName,
+        name: combinedFullName,
+        firstName: firstName.trim(),
+        lastName: surname.trim(),
         username: username.trim().toLowerCase(),
         phoneNumber: formattedPhone,
-        role: selectedRole,
-        isAgent: selectedRole === 'Agent',
+        userStates: ['Default', selectedRole],
         gender,
         ageVerified: true,
         onboardingCompleted: true,
         phoneVerified: true,
+        phoneVerifiedAt: new Date().toISOString(),
         profileComplete: true,
         welcomeToastShown: false,
-        kycStatus: selectedRole === 'Agent' ? 'Pending' : 'None',
+        kycStatus: 'None',
         kycDocuments: [],
         profileScore: 25,
         tokens: 100,
@@ -369,18 +374,39 @@ export default function CompleteProfile() {
         <form onSubmit={handleUpdateProfileSubmit} className="space-y-4">
           {/* Missing Full name */}
           {missingFlags.fullName && (
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-brand-black dark:text-zinc-300 uppercase tracking-widest block">Full Name</label>
-              <div className="relative">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-550" size={18} />
-                <input
-                  type="text"
-                  required
-                  placeholder="Musa Aminu"
-                  value={fullName}
-                  onChange={(e) => { setFullName(e.target.value); setError(null); }}
-                  className="w-full !pl-10 pr-4 py-3 bg-white dark:bg-zinc-800 border-2 border-brand-black text-brand-black dark:text-white font-medium text-sm focus:outline-none transition-all"
-                />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-brand-black dark:text-zinc-300 uppercase tracking-widest block">
+                  Surname <span className="text-brand-red font-black">*</span>
+                </label>
+                <div className="relative">
+                  <User className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-550" size={18} />
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Aminu"
+                    value={surname}
+                    onChange={(e) => { setSurname(e.target.value); setError(null); }}
+                    className="w-full !pl-10 pr-4 py-3 bg-white dark:bg-zinc-800 border-2 border-brand-black text-brand-black dark:text-white font-medium text-sm focus:outline-none transition-all"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-brand-black dark:text-zinc-300 uppercase tracking-widest block">
+                  First Name <span className="text-brand-red font-black">*</span>
+                </label>
+                <div className="relative">
+                  <User className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-550" size={18} />
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Musa"
+                    value={firstName}
+                    onChange={(e) => { setFirstName(e.target.value); setError(null); }}
+                    className="w-full !pl-10 pr-4 py-3 bg-white dark:bg-zinc-800 border-2 border-brand-black text-brand-black dark:text-white font-medium text-sm focus:outline-none transition-all"
+                  />
+                </div>
               </div>
             </div>
           )}
@@ -570,7 +596,7 @@ export default function CompleteProfile() {
               (missingFlags.username && !username.trim()) ||
               (missingFlags.username && isUsernameUnique !== true) ||
               (missingFlags.phoneNumber && isPhoneUnique !== true) ||
-              (missingFlags.fullName && !fullName.trim()) ||
+              (missingFlags.fullName && (!firstName.trim() || !surname.trim())) ||
               !isAgeVerified ||
               loading
             }

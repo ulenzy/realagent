@@ -7,6 +7,7 @@ import { ArrowLeft, ShieldAlert, CheckCircle, CreditCard, Coins, Check, FileText
 import { ListingRequest } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useNavigation } from '../context/NavigationContext';
+import { LISTING_DURATIONS, RENEWAL_DURATIONS } from '../constants/fees';
 
 export default function ListPropertyFlow() {
   const { user, updateUser, updateTokens, addTransaction, listingRequests, addListingRequest, drafts, saveDraft } = useAuth();
@@ -18,6 +19,8 @@ export default function ListPropertyFlow() {
   const [tokenError, setTokenError] = useState<string | null>(null);
   const [draftError, setDraftError] = useState<string | null>(null);
   const [draftSaved, setDraftSaved] = useState(false);
+  const [selectedDuration, setSelectedDuration] = useState(LISTING_DURATIONS[0]);
+  const [durationConfirmed, setDurationConfirmed] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [submittedRequestTitle, setSubmittedRequestTitle] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -299,7 +302,18 @@ export default function ListPropertyFlow() {
     setIsSubmitting(true);
     try {
       const now = new Date().toISOString();
-      const expires = new Date(Date.now() + 30 * 86400000).toISOString();
+      
+      const durationDays = formData.listingDurationDays || selectedDuration.days;
+      let totalDays = formData.listingTotalDays || selectedDuration.totalDays;
+      if (!formData.isDraft && formData.renewalOf) {
+        const matchedRenewal = RENEWAL_DURATIONS.find(d => d.days === durationDays);
+        if (matchedRenewal) {
+          totalDays = matchedRenewal.totalDays;
+        } else {
+          totalDays = durationDays;
+        }
+      }
+      const expires = new Date(Date.now() + totalDays * 86400000).toISOString();
       
       const PLATFORM_COMMISSION_RATE = 5;
       const resolvedCommission = user.commissionRate !== undefined ? user.commissionRate : PLATFORM_COMMISSION_RATE;
@@ -381,8 +395,10 @@ export default function ListPropertyFlow() {
           verificationFeePaid: user.verifiedPropertySeller || false,
           verificationFeePaidAt: user.verificationFeePaidAt || '',
           monthlyFeePaidAt: user.monthlyFeePaidAt || '',
-          monthlyFeeExpiresAt: user.monthlyFeeExpiresAt || '',
+          monthlyFeeExpiresAt: expires,
           dealStatus: 'Open',
+          listingDurationDays: durationDays,
+          listingTotalDays: totalDays,
           listingRequirements: {
             titleDocumentFileName: formData.titleDocumentFile ? formData.titleDocumentFile.name : '',
             titleDocumentFileType: formData.titleDocumentFile ? formData.titleDocumentFile.type : '',
@@ -424,8 +440,10 @@ export default function ListPropertyFlow() {
           verificationFeePaid: user.verifiedPropertySeller || false,
           verificationFeePaidAt: user.verificationFeePaidAt || '',
           monthlyFeePaidAt: user.monthlyFeePaidAt || '',
-          monthlyFeeExpiresAt: user.monthlyFeeExpiresAt || '',
+          monthlyFeeExpiresAt: expires,
           dealStatus: 'Open',
+          listingDurationDays: durationDays,
+          listingTotalDays: totalDays,
           listingRequirements: {
             titleDocumentFileName: formData.titleDocumentFile ? formData.titleDocumentFile.name : '',
             titleDocumentFileType: formData.titleDocumentFile ? formData.titleDocumentFile.type : '',
@@ -540,11 +558,98 @@ export default function ListPropertyFlow() {
     );
   }
 
-    // Both gates checked and paid successfully.
+  // Both gates checked and paid successfully.
+  if (!durationConfirmed) {
+    return (
+      <div className="min-h-screen bg-brand-gray dark:bg-[#1c1c21] p-6 animate-fadeIn">
+        <div className="max-w-2xl mx-auto bg-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-700 p-8 shadow-brutal-md">
+          <div className="flex items-center gap-2 mb-6 cursor-pointer text-xs font-black uppercase text-zinc-500 hover:text-brand-black dark:hover:text-white" onClick={onBack}>
+            <ArrowLeft size={16} />
+            <span>Cancel</span>
+          </div>
+
+          <div className="text-center mb-8 border-b-2 border-brand-black dark:border-zinc-700 pb-6">
+            <h2 id="title-listing-duration" className="text-3xl font-display font-black tracking-tighter dark:text-white uppercase">CHOOSE LISTING DURATION</h2>
+            <p className="text-xs text-zinc-500 font-bold uppercase tracking-tight mt-2">
+              Select the active marketing timeline for your property listing.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-4 mb-8">
+            {LISTING_DURATIONS.map((dur) => {
+              const isSelected = selectedDuration.days === dur.days;
+              return (
+                <div
+                  key={dur.days}
+                  id={`duration-card-${dur.days}`}
+                  onClick={() => setSelectedDuration(dur)}
+                  className={`border-4 p-5 cursor-pointer flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 transition-all ${
+                    isSelected
+                      ? 'border-brand-teal bg-teal-50/20 dark:bg-zinc-800 shadow-[4px_4px_0px_0px_rgba(20,184,166,1)]'
+                      : 'border-brand-black dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-750'
+                  }`}
+                >
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-xs font-mono font-extrabold uppercase tracking-widest text-zinc-400 dark:text-zinc-500">
+                        {dur.label} Option
+                      </span>
+                      {isSelected && (
+                        <span className="bg-brand-teal text-brand-black px-1.5 py-0.5 text-[9px] font-black uppercase tracking-tight">
+                          SELECTED
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="text-3xl font-display font-black uppercase tracking-tight dark:text-white">
+                      {dur.totalDays} Days
+                    </div>
+
+                    <p className="text-[10px] text-brand-teal font-extrabold uppercase mt-1">
+                      includes {dur.bonusDays}-day new listing bonus
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-4 border-t-2 sm:border-t-0 sm:border-l-2 border-dashed border-zinc-200 dark:border-zinc-700 pt-3 sm:pt-0 sm:pl-6 shrink-0">
+                    <div className="text-right sm:text-left">
+                      <span className="text-[9px] text-zinc-400 font-mono block uppercase">Naira Price</span>
+                      <span className="text-lg font-display font-black text-brand-black dark:text-white">
+                        ₦{dur.naira.toLocaleString()}
+                      </span>
+                    </div>
+
+                    <div className="text-right sm:text-left">
+                      <span className="text-[9px] text-zinc-400 font-mono block uppercase">Token Equivalent</span>
+                      <span className="text-lg font-display font-black text-amber-500">
+                        {dur.tokens} Tokens
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <button
+            id="btn-continue-duration"
+            onClick={() => setDurationConfirmed(true)}
+            className="w-full brutalist-button-teal py-4 text-xs font-black uppercase tracking-wider cursor-pointer"
+          >
+            CONTINUE
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (listingCategory === 'Building') {
     return (
       <>
-        <BuildingListingForm onSubmit={handleListingSubmit} onBack={() => setListingCategory(null)} />
+        <BuildingListingForm 
+          onSubmit={handleListingSubmit} 
+          onBack={() => setListingCategory(null)} 
+          initialData={{ listingDurationDays: selectedDuration.days, listingTotalDays: selectedDuration.totalDays }}
+        />
         {/* Custom modal overlays for draft errors */}
         <AnimatePresence>
           {draftError && (
@@ -580,7 +685,11 @@ export default function ListPropertyFlow() {
   if (listingCategory === 'Land') {
     return (
       <>
-        <LandListingForm onSubmit={handleListingSubmit} onBack={() => setListingCategory(null)} />
+        <LandListingForm 
+          onSubmit={handleListingSubmit} 
+          onBack={() => setListingCategory(null)} 
+          initialData={{ listingDurationDays: selectedDuration.days, listingTotalDays: selectedDuration.totalDays }}
+        />
         {/* Custom modal overlays for draft errors */}
         <AnimatePresence>
           {draftError && (
@@ -595,7 +704,7 @@ export default function ListPropertyFlow() {
                   <ShieldAlert size={32} />
                   <h3 className="text-xl font-display font-black uppercase tracking-tight">DRAFT LIMIT EXCEEDED</h3>
                 </div>
-                <p className="text-xs font-bold text-zinc-600 dark:text-zinc-350 uppercase leading-relaxed mb-6">
+                <p className="text-xs font-bold text-zinc-600 dark:text-zinc-355 uppercase leading-relaxed mb-6">
                   {draftError}
                 </p>
                 <button

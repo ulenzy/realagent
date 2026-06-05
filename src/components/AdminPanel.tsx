@@ -21,7 +21,8 @@ import {
   MapPin, 
   FileCheck,
   ChevronRight,
-  UserCheck
+  UserCheck,
+  CheckCircle
 } from "lucide-react";
 import { cn, formatCurrency } from "../lib/utils";
 import { collection, query, where, getDocs, onSnapshot, updateDoc, doc, addDoc, setDoc, getDoc } from "firebase/firestore";
@@ -199,10 +200,13 @@ export default function AdminPanel() {
   const isLocalGuest = !db || user?.isGuest || user?.id === 'guest_local_user';
 
   // Sub-tabs
-  const [activeTab, setActiveTab] = useState<'listings' | 'kyc' | 'agents' | 'disputes' | 'notifications' | 'analytics'>('listings');
+  const [activeTab, setActiveTab] = useState<'listings' | 'kyc' | 'agents' | 'agent_applications' | 'disputes' | 'notifications' | 'analytics'>('listings');
 
   // Real-time Database state
   const [kycList, setKycList] = useState<any[]>([]);
+  const [agentAppsList, setAgentAppsList] = useState<any[]>([]);
+  const [rejectingAppId, setRejectingAppId] = useState<string | null>(null);
+  const [appRejectionReason, setAppRejectionReason] = useState("");
   const [agentsList, setAgentsList] = useState<any[]>([]);
   const [disputesList, setDisputesList] = useState<any[]>([]);
   const [activeDisputeNotes, setActiveDisputeNotes] = useState<{ [id: string]: string }>({});
@@ -272,10 +276,17 @@ export default function AdminPanel() {
       setDisputesList(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     }, err => console.error("Disputes Snapshot Error:", err));
 
+    // Stream Agent Applications
+    const qApps = query(collection(db, 'agentApplications'), where('status', '==', 'Pending'));
+    const unsubApps = onSnapshot(qApps, (snap) => {
+      setAgentAppsList(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, err => console.error("Agent Apps Snapshot Error:", err));
+
     return () => {
       unsubKyc();
       unsubAgents();
       unsubDisputes();
+      unsubApps();
     };
   }, [user, isLocalGuest]);
 
@@ -509,6 +520,92 @@ export default function AdminPanel() {
     } catch (err) {
       console.error(err);
       alert("Error confirming agent verification.");
+    }
+  };
+
+  // 6.5. AGENT APPLICATIONS MANAGEMENT
+  const handleApproveApp = async (appId: string, applicantId: string) => {
+    try {
+      if (isLocalGuest) {
+        alert(`[Simulated] Approved agent app: ${appId}. Candidate ${applicantId} promoted to Agent.`);
+        return;
+      }
+      // Update app status
+      await updateDoc(doc(db, "agentApplications", appId), {
+        status: "Approved",
+        approvedAt: new Date().toISOString()
+      });
+
+      // Fetch, append, and update userStates
+      const userRef = doc(db, "users", applicantId);
+      const userSnap = await getDoc(userRef);
+      let newStates = ["Default", "Agent"];
+      if (userSnap.exists()) {
+        const currentStates = userSnap.data().userStates || [];
+        newStates = currentStates.includes("Agent") ? currentStates : [...currentStates, "Agent"];
+      }
+      await updateDoc(userRef, {
+        agentApplicationStatus: "Approved",
+        userStates: newStates
+      });
+
+      // Send in-app notification
+      await addDoc(collection(db, "notifications"), {
+        userId: applicantId,
+        type: "agent_approved",
+        title: "Agent Application Approved",
+        body: "Congratulations! Your application to become a Platform Agent has been approved. Welcome to the team!",
+        createdAt: new Date().toISOString(),
+        read: false
+      });
+
+      alert("Agent application approved successfully!");
+    } catch (err: any) {
+      console.error("Error approving application:", err);
+      alert("Failed to approve: " + err.message);
+    }
+  };
+
+  const handleRejectApp = async (appId: string, applicantId: string) => {
+    if (!appRejectionReason.trim()) {
+      alert("Please enter a rejection reason.");
+      return;
+    }
+    try {
+      if (isLocalGuest) {
+        alert(`[Simulated] Rejection message sent. Application of Candidate ${applicantId} rejected.`);
+        setRejectingAppId(null);
+        setAppRejectionReason("");
+        return;
+      }
+      // Update app status
+      await updateDoc(doc(db, "agentApplications", appId), {
+        status: "Rejected",
+        rejectedAt: new Date().toISOString(),
+        rejectionReason: appRejectionReason
+      });
+
+      // Update user status
+      await updateDoc(doc(db, "users", applicantId), {
+        agentApplicationStatus: "Rejected"
+      });
+
+      // Notify candidate
+      await addDoc(collection(db, "notifications"), {
+        userId: applicantId,
+        type: "agent_rejected",
+        title: "Agent Application Rejected",
+        body: `Your agent application was not approved. Reason: ${appRejectionReason}`,
+        createdAt: new Date().toISOString(),
+        read: false
+      });
+
+      setRejectingAppId(null);
+      setAppRejectionReason("");
+      alert("Agent application rejected.");
+    } catch (err: any) {
+      console.error("Error rejecting application:", err);
+      alert("Failed to reject: " + err.message);
     }
   };
 
@@ -870,6 +967,7 @@ export default function AdminPanel() {
           { key: 'listings', label: 'Listings', icon: <Building size={16} /> },
           { key: 'kyc', label: 'KYC', icon: <Users size={16} /> },
           { key: 'agents', label: 'Agents', icon: <UserCheck size={16} /> },
+          { key: 'agent_applications', label: 'Agent Apps', icon: <UserCheck size={16} /> },
           { key: 'disputes', label: 'Disputes', icon: <Scale size={16} /> },
           { key: 'notifications', label: 'Notifications', icon: <Bell size={16} /> },
           { key: 'analytics', label: 'Analytics', icon: <BarChart3 size={16} /> },
@@ -1118,7 +1216,7 @@ export default function AdminPanel() {
                     <div className="flex items-center gap-2">
                       <h4 className="font-display font-black text-sm uppercase text-brand-black dark:text-white">{kycUser.name}</h4>
                       <span className="text-[8px] font-bold bg-zinc-800 text-white px-2 py-0.5 uppercase tracking-normal">
-                        Role: {kycUser.role || "User"}
+                        States: {(kycUser.userStates || []).filter((s: string) => s !== 'Default').join(', ') || "Default"}
                       </span>
                     </div>
 
@@ -1210,6 +1308,114 @@ export default function AdminPanel() {
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3.5: AGENT APPLICATIONS */}
+        {activeTab === 'agent_applications' && (
+          <div className="space-y-6">
+            <div className="border-b-2 border-zinc-200 dark:border-zinc-800 pb-3 flex items-center justify-between">
+              <div>
+                <h3 className="font-display font-black text-base uppercase text-zinc-900 dark:text-white">AGENCY APPLICANT ONBOARDING PIPELINE</h3>
+                <p className="text-xs text-zinc-500 uppercase tracking-wider">Review, approve, or reject pending agent profiles and certification credentials</p>
+              </div>
+              <span className="bg-brand-teal text-brand-black px-2 py-0.5 text-xs font-black uppercase tracking-tight">
+                {agentAppsList.length} PENDING APPLICATIONS
+              </span>
+            </div>
+
+            <div className="space-y-4">
+              {agentAppsList.length === 0 ? (
+                <div className="p-8 border-2 border-dashed border-zinc-300 dark:border-zinc-700 text-center uppercase font-bold text-xs text-zinc-400">
+                  No pending agent applications.
+                </div>
+              ) : (
+                agentAppsList.map((app) => (
+                  <div key={app.id} className="bg-zinc-50 dark:bg-[#1a1a1f] border-2 border-brand-black dark:border-zinc-750 p-4 flex flex-col md:flex-row gap-4 justify-between items-start md:items-center">
+                    <div className="space-y-2 flex-1">
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-display font-black text-sm uppercase text-brand-black dark:text-white">{app.applicantName}</h4>
+                        <span className="text-[8px] font-bold bg-zinc-800 text-white px-2 py-0.5 uppercase tracking-normal">
+                          KYC: {app.kycStatus || "None"}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs font-semibold uppercase text-zinc-500">
+                        <div>
+                          <span className="text-[9px] text-zinc-400 block font-mono">Contact Phone & Email</span>
+                          <span className="text-brand-black dark:text-gray-200 font-bold block">{app.phone || "No Phone"}</span>
+                          <span className="text-zinc-650 dark:text-gray-400 font-normal lowercase block">{app.email}</span>
+                        </div>
+                        <div>
+                          <span className="text-[9px] text-zinc-400 block font-mono">Date of Birth</span>
+                          <span className="text-zinc-900 dark:text-gray-200 font-bold">{app.dateOfBirth || "N/A"}</span>
+                        </div>
+                        <div>
+                          <span className="text-[9px] text-zinc-400 block font-mono">Certified Agent Info</span>
+                          {app.certifiedAgent ? (
+                            <div className="text-[10px] space-y-0.5 font-bold text-zinc-700 dark:text-zinc-300">
+                              <span className="block text-brand-teal">{app.certifiedAgent.registrationBody} License</span>
+                              <span className="block italic">{app.certifiedAgent.registrationNumber}</span>
+                              <span className="block">{app.certifiedAgent.yearsOfExperience} years experience</span>
+                            </div>
+                          ) : (
+                            <span className="text-zinc-400 italic">No Professional Credentials (Skipped)</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-2 w-full md:w-48 self-stretch justify-center">
+                      <button
+                        onClick={() => handleApproveApp(app.id, app.applicantId)}
+                        className="w-full bg-brand-teal text-brand-black hover:opacity-95 font-black text-xs uppercase py-2 px-2 border border-brand-black shadow-brutal-xs flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <CheckCircle size={14} /> APPROVE
+                      </button>
+
+                      {rejectingAppId === app.id ? (
+                        <div className="space-y-1.5 border-t border-dashed border-brand-red pt-1.5">
+                          <input
+                            type="text"
+                            placeholder="Rejection Reason?"
+                            value={appRejectionReason}
+                            onChange={(e) => setAppRejectionReason(e.target.value)}
+                            className="w-full bg-white dark:bg-zinc-800 text-xs font-bold p-1 hover:border-brand-black border border-zinc-300 focus:outline-none focus:border-brand-red rounded-none"
+                          />
+                          <div className="flex gap-1.5">
+                            <button
+                              onClick={() => handleRejectApp(app.id, app.applicantId)}
+                              className="flex-1 bg-brand-red hover:bg-red-500 text-white font-black text-[9px] uppercase py-1 border border-brand-black cursor-pointer"
+                            >
+                              SUBMIT
+                            </button>
+                            <button
+                              onClick={() => {
+                                setRejectingAppId(null);
+                                setAppRejectionReason("");
+                              }}
+                              className="px-2 bg-zinc-300 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 border border-brand-black text-[9px] font-black cursor-pointer"
+                            >
+                              X
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            setRejectingAppId(app.id);
+                            setAppRejectionReason("");
+                          }}
+                          className="w-full bg-brand-red hover:bg-red-500 text-white font-black text-xs uppercase py-2 px-2 border border-brand-black shadow-brutal-xs flex items-center justify-center gap-1 cursor-pointer"
+                        >
+                          <X size={14} /> REJECT
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         )}

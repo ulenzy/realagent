@@ -32,7 +32,8 @@ export default function Login() {
   const [emailMode, setEmailMode] = useState<'signin' | 'signup'>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [fullName, setFullName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [surname, setSurname] = useState('');
 
   React.useEffect(() => {
     const hint = localStorage.getItem('realagents_provider_hint');
@@ -220,18 +221,35 @@ export default function Login() {
           /* Email Sign-in/Sign-up Panel */
           <form onSubmit={handleEmailAuth} className="space-y-4">
             {emailMode === 'signup' && (
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-brand-black dark:text-zinc-300 uppercase tracking-widest">Full Name</label>
-                <div className="relative">
-                  <User className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-550" size={18} />
-                  <input
-                    type="text"
-                    required
-                    placeholder="Musa Aminu"
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    className="w-full !pl-10 pr-4 py-3 bg-white dark:bg-zinc-800 border-2 border-brand-black text-brand-black dark:text-white font-medium text-sm focus:outline-none focus:ring-2 focus:ring-brand-teal transition-all"
-                  />
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-brand-black dark:text-zinc-300 uppercase tracking-widest">Surname</label>
+                  <div className="relative">
+                    <User className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-550" size={18} />
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Aminu"
+                      value={surname}
+                      onChange={(e) => setSurname(e.target.value)}
+                      className="w-full !pl-10 pr-4 py-3 bg-white dark:bg-zinc-800 border-2 border-brand-black text-brand-black dark:text-white font-medium text-sm focus:outline-none focus:ring-2 focus:ring-brand-teal transition-all"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-brand-black dark:text-zinc-300 uppercase tracking-widest">First Name</label>
+                  <div className="relative">
+                    <User className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-550" size={18} />
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Musa"
+                      value={firstName}
+                      onChange={(e) => setFirstName(e.target.value)}
+                      className="w-full !pl-10 pr-4 py-3 bg-white dark:bg-zinc-800 border-2 border-brand-black text-brand-black dark:text-white font-medium text-sm focus:outline-none focus:ring-2 focus:ring-brand-teal transition-all"
+                    />
+                  </div>
                 </div>
               </div>
             )}

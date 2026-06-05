@@ -6,7 +6,7 @@ import { sendNotification } from "../lib/notifications";
 import { db, storage } from "../lib/firebase";
 import { doc, setDoc, updateDoc, collection, getDocs, query, where } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { cn } from "../lib/utils";
+import { cn, hasState } from "../lib/utils";
 import { Property, Dispute } from "../types";
 
 interface DisputeFlowProps {
@@ -159,7 +159,7 @@ export const DisputeFlow: React.FC<DisputeFlowProps> = ({ property, onClose }) =
         listingId,
         propertyTitle: property.title,
         raisedBy: user.id,
-        raisedByRole: user.role as 'Buyer' | 'Seller' | 'Agent',
+        raisedByState: (hasState(user, 'Seller') ? 'Seller' : (hasState(user, 'Agent') ? 'Agent' : 'Buyer')) as 'Buyer' | 'Seller' | 'Agent',
         againstUserId,
         type: disputeType,
         description,
@@ -238,7 +238,7 @@ export const DisputeFlow: React.FC<DisputeFlowProps> = ({ property, onClose }) =
       } else {
         // Query admins in Firestore
         try {
-          const adminsQuery = query(collection(db, 'users'), where('role', '==', 'Admin'));
+          const adminsQuery = query(collection(db, 'users'), where('userStates', 'array-contains', 'Admin'));
           const snapshot = await getDocs(adminsQuery);
           snapshot.forEach(docSnap => {
             sendNotification(docSnap.id, {

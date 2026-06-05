@@ -11,7 +11,7 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Home, Search, FileText, Zap, MessageCircle, Moon, Sun, Gavel, Heart, Store, Sparkles, LayoutDashboard, Plus, ShieldAlert, Info, Settings, Bell, ArrowLeft, Share2 } from 'lucide-react';
-import { cn } from './lib/utils';
+import { cn, hasState } from './lib/utils';
 import { mockProperties } from './data/mockListings';
 import { ListingRequest, Property } from './types';
 import { doc, onSnapshot, collection, query, updateDoc, orderBy, limit, startAfter, getDocs, writeBatch } from 'firebase/firestore';
@@ -251,7 +251,7 @@ export default function App() {
   }, [updateUser]);
 
   const handleActionClick = () => {
-    if (user?.role === 'Agent' || user?.role === 'Seller') {
+    if (hasState(user, 'Agent') || hasState(user, 'Seller')) {
       setActiveTab('profile');
     }
     handleDismissWelcomeToast();
@@ -368,6 +368,10 @@ export default function App() {
     return <Login />;
   }
 
+  if (user && !user.onboardingCompleted) {
+    return <Onboarding />;
+  }
+
   if (firebaseUser && user && !(user as any).phoneVerified) {
     return <PhoneVerification />;
   }
@@ -435,16 +439,16 @@ export default function App() {
             <div className="bg-brand-black text-white dark:bg-zinc-900 border-4 border-brand-black dark:border-zinc-300 p-4 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,1)] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="flex items-start gap-3">
                 <div className="p-2 bg-brand-teal dark:bg-teal-900/30 text-brand-black dark:text-brand-teal border-2 border-brand-black shrink-0 relative rotate-2 max-sm:hidden">
-                  {user.role === 'Buyer' ? <Sparkles size={18} /> : <ShieldAlert size={18} />}
+                  {hasState(user, 'Buyer') ? <Sparkles size={18} /> : <ShieldAlert size={18} />}
                 </div>
                 <div>
                   <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-brand-teal leading-none mb-1">
                     System Intelligence Notice
                   </h4>
                   <p className="text-xs font-bold leading-normal text-zinc-200 uppercase">
-                    {user.role === 'Buyer' && "Welcome — browse listings and save your favourites."}
-                    {user.role === 'Seller' && "Welcome — tap + to list your first property. KYC required before submission."}
-                    {user.role === 'Agent' && "Welcome — complete KYC in your Profile to start bidding on listings."}
+                    {hasState(user, 'Buyer') && "Welcome — browse listings and save your favourites."}
+                    {hasState(user, 'Seller') && "Welcome — tap + to list your first property. KYC required before submission."}
+                    {hasState(user, 'Agent') && "Welcome — complete KYC in your Profile to start bidding on listings."}
                   </p>
                 </div>
               </div>
@@ -452,7 +456,7 @@ export default function App() {
                 onClick={handleActionClick}
                 className="bg-brand-teal text-brand-black font-display font-black uppercase text-[10px] tracking-widest px-4 py-2 border-2 border-brand-black shrink-0 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all cursor-pointer self-stretch sm:self-center text-center"
               >
-                {user.role === 'Buyer' ? "Acknowledge" : "Go to Profile"}
+                {hasState(user, 'Buyer') ? "Acknowledge" : "Go to Profile"}
               </button>
             </div>
           </motion.div>
@@ -632,10 +636,10 @@ export default function App() {
                 <MySpace 
                   defaultActiveSubTab={
                     mySpaceSubTab || (
-                      user?.role === 'Seller' 
-                        ? 'My Listings' 
-                        : user?.role === 'Agent' 
-                          ? 'Bids' 
+                      hasState(user, 'Agent') 
+                        ? 'Bids' 
+                        : hasState(user, 'Seller') 
+                          ? 'My Listings' 
                           : 'Wishlist'
                     )
                   } 
@@ -671,7 +675,7 @@ export default function App() {
       {/* Bottom Navigation - Aggressive & High Contrast */}
       {!selectedPropertyId && !isListingFlow && (
         <nav className="fixed bottom-0 left-0 right-0 bg-white dark:bg-[#1c1c21] border-t-4 border-black dark:border-zinc-700 p-2 z-50 transition-colors duration-300">
-          <div className={cn("max-w-md mx-auto flex justify-between items-center px-4", user?.role === 'Admin' && "max-w-lg")}>
+          <div className={cn("max-w-md mx-auto flex justify-between items-center px-4", hasState(user, 'Admin') && "max-w-lg")}>
              <TabButton 
               active={activeTab === 'marketplace'} 
               onClick={() => { setActiveTab('marketplace'); handleBackToMarketplace(); }}
@@ -691,7 +695,7 @@ export default function App() {
               icon={<LayoutDashboard />}
               label="My Space"
             />
-            {user?.role === 'Admin' && (
+            {hasState(user, 'Admin') && (
               <TabButton 
                 active={activeTab === 'admin'} 
                 onClick={() => { setActiveTab('admin'); handleBackToMarketplace(); }}

@@ -20,11 +20,14 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().get('role', '') == 'Admin';
+      return isSignedIn() && (
+        ('userStates' in request.auth.token && 'Admin' in request.auth.token.userStates) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 'Admin' in getUserData().get('userStates', []))
+      );
     }
 
     function isAgent() {
-      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().get('role', '') == 'Agent';
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 'Agent' in getUserData().get('userStates', []);
     }
 
     function incoming() {
@@ -129,18 +132,23 @@ service cloud.firestore {
       allow read: if isSignedIn();
       
       allow create: if isOwner(userId) && isValidUser(incoming()) && 
-                    incoming().get('role', 'Buyer') == 'Buyer' &&
+                    incoming().get('userStates', []).hasAny(['Default']) &&
                     incoming().get('tokens', 100) == 100 &&
                     incoming().get('kycStatus', 'None') == 'None' &&
-                    incoming().get('isAgent', false) == false &&
                     incoming().get('isSubscriber', false) == false;
 
       allow update: if isAdmin() || (
         isOwner(userId) && isValidUser(incoming()) && (
-          incoming().get('role', 'Buyer') != 'Admin' &&
+          !('Admin' in incoming().get('userStates', [])) &&
           (incoming().get('kycStatus', 'None') == 'None' || incoming().get('kycStatus', 'None') == 'Pending' || incoming().get('kycStatus', 'None') == existing().get('kycStatus', 'None')) &&
           incoming().get('isSubscriber', false) is bool &&
-          incoming().get('tokens', 0) is number && incoming().get('tokens', 0) >= 0 && incoming().get('tokens', 0) <= 100000
+          incoming().get('tokens', 0) is number && incoming().get('tokens', 0) >= 0 && incoming().get('tokens', 0) <= 100000 &&
+          (
+            !(incoming().get('phoneNumber', '') != existing().get('phoneNumber', '') || 
+              incoming().get('phoneVerified', false) != existing().get('phoneVerified', false)) ||
+            (existing().get('phoneVerifiedAt', null) == null || 
+             request.time > (timestamp(existing().phoneVerifiedAt) + duration.value(14, 'd')))
+          )
         )
       );
 

@@ -20,10 +20,10 @@ import {
   sendEmailVerification
 } from 'firebase/auth';
 import { auth, googleProvider, facebookProvider } from '../lib/firebase';
-import { doc, getDoc, getDocs, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove, collection, query, where, addDoc, deleteDoc, Timestamp, runTransaction, increment, orderBy, limit, startAfter } from 'firebase/firestore';
+import { doc, getDoc, getDocs, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove, collection, query, where, addDoc, deleteDoc, Timestamp, runTransaction, increment, orderBy, limit, startAfter, deleteField } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { sendNotification } from '../lib/notifications';
-import { User, ListingRequest, ListingStatus, Transaction, Property, ListingType, AgentTier, ROILevel, AreaTrend } from '../types';
+import { User, ListingRequest, ListingStatus, Transaction, Property, ListingType, AgentTier, ROILevel, AreaTrend, UserState } from '../types';
 import { TrustScoreEvent, calculateTrustScoreDelta } from '../lib/trustScore';
 import { generateEstateIntelligence } from '../lib/estateIntelligence';
 
@@ -47,6 +47,9 @@ interface AuthContextType {
   updateListingRequest: (id: string, updates: Partial<ListingRequest>) => Promise<void>;
   updateUser: (updates: Partial<User>) => Promise<void>;
   updateUserEmail: (newEmail: string) => Promise<void>;
+  addUserState: (state: UserState) => Promise<void>;
+  removeUserState: (state: UserState) => Promise<void>;
+  hasState: (state: UserState) => boolean;
   updateTokens: (delta: number) => Promise<void>;
   addTransaction: (transaction: Transaction) => Promise<void>;
   updateAgentTrustScore: (agentId: string, event: TrustScoreEvent) => Promise<void>;
@@ -54,9 +57,12 @@ interface AuthContextType {
   saveDraft: (draftData: Partial<ListingRequest>) => Promise<string>;
   updateDraft: (draftId: string, data: Partial<ListingRequest>) => Promise<void>;
   deleteDraft: (draftId: string) => Promise<void>;
+  deleteListing: (id: string) => Promise<void>;
   promoteDraftToListing: (draftId: string) => Promise<void>;
   loadMorePlatformListings: () => Promise<void>;
   loadMoreListingRequests: () => Promise<void>;
+  createInspectionRequest: (bookingData: any) => Promise<string>;
+  concludeInspection: (inspectionId: string) => Promise<void>;
 }
 
 export const DEFAULT_PREFERENCES = {
@@ -114,6 +120,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setFirebaseUser(fUser);
       setError(null);
       if (fUser) {
+        // Run one-time user states migration
+        const migrationDone = localStorage.getItem('user_migration_done_v1');
+        if (!migrationDone) {
+          (async () => {
+            try {
+              console.log("=== Running One-Time User States Migration ===");
+              const usersSnap = await getDocs(collection(db, 'users'));
+              console.log(`Found ${usersSnap.size} user profiles to migrate.`);
+              for (const uDoc of usersSnap.docs) {
+                const uData = uDoc.data();
+                const uUpdates: any = {};
+                if (!uData.userStates) {
+                  uUpdates.userStates = ['Default'];
+                }
+                if ('role' in uData) {
+                  uUpdates.role = deleteField();
+                }
+                if (Object.keys(uUpdates).length > 0) {
+                  await updateDoc(doc(db, 'users', uDoc.id), uUpdates);
+                  console.log(`Migrated user profile for: ${uDoc.id}`);
+                }
+              }
+              localStorage.setItem('user_migration_done_v1', 'true');
+              console.log("=== User States Migration Completed ===");
+            } catch (err) {
+              console.error("User states migration error:", err);
+            }
+          })();
+        }
+
         // Fast-path client-side optimization to retrieve profile details instantly and prevent duplicate Firestore initial reads
         const cachedComplete = localStorage.getItem(`realagents_profile_completed_${fUser.uid}`) === 'true';
         if (cachedComplete) {
@@ -165,13 +201,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               console.error("Drafts subscription error:", err);
             });
 
-            // Dynamically set up listingRequests subscription depending on role
+            // Dynamically set up listingRequests subscription depending on userStates
             if (unsubscribeListingsRef.current) {
               unsubscribeListingsRef.current();
             }
 
             let listingsQuery;
-            if (userData.role === 'Agent' || userData.role === 'Admin') {
+            if (userData.userStates?.includes('Agent') || userData.userStates?.includes('Admin')) {
               // Paginated query for Agents/Admin
               listingsQuery = query(
                 collection(db, 'listingRequests'),
@@ -193,7 +229,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 ...doc.data()
               } as any));
               setLiveListingRequests(listings);
-              if (userData.role === 'Agent' || userData.role === 'Admin') {
+              if (userData.userStates?.includes('Agent') || userData.userStates?.includes('Admin')) {
                 if (snapshot.docs.length > 0) {
                   setListingRequestsLastDoc(snapshot.docs[snapshot.docs.length - 1]);
                 } else {
@@ -209,7 +245,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               unsubscribePlatformListingsRef.current();
             }
 
-            if (userData.role === 'Agent' || userData.role === 'Admin') {
+            if (userData.userStates?.includes('Agent') || userData.userStates?.includes('Admin')) {
               const platformQuery = query(
                 collection(db, 'listingRequests'),
                 where('status', '==', 'Agent Bidding'),
@@ -246,14 +282,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               lastName: lastName,
               email: fUser.email || '',
               phoneNumber: fUser.phoneNumber || '',
-              isAgent: false,
               isSubscriber: false,
               kycStatus: 'None',
               kycDocuments: [],
               profileScore: 0,
               tokens: 100, // Initial tokens
               savedProperties: [],
-              role: 'Buyer',
+              userStates: ['Default'],
               onboardingCompleted: false,
               phoneVerified: false,
               preferences: DEFAULT_PREFERENCES,
@@ -336,14 +371,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         lastName: 'User',
         email: 'user@gmail.com',
         phoneNumber: '',
-        isAgent: false,
         isSubscriber: false,
         kycStatus: 'None',
         kycDocuments: [],
         profileScore: 0,
         tokens: 100,
         savedProperties: [],
-        role: 'Buyer',
+        userStates: ['Default'],
         onboardingCompleted: false,
         phoneVerified: false,
         preferences: DEFAULT_PREFERENCES,
@@ -391,14 +425,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         lastName: 'User',
         email: 'user@facebook.com',
         phoneNumber: '',
-        isAgent: false,
         isSubscriber: false,
         kycStatus: 'None',
         kycDocuments: [],
         profileScore: 0,
         tokens: 100,
         savedProperties: [],
-        role: 'Buyer',
+        userStates: ['Default'],
         onboardingCompleted: false,
         phoneVerified: false,
         preferences: DEFAULT_PREFERENCES,
@@ -460,14 +493,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         lastName: lastName,
         email: email,
         phoneNumber: '',
-        isAgent: false,
         isSubscriber: false,
         kycStatus: 'None',
         kycDocuments: [],
         profileScore: 0,
         tokens: 100,
         savedProperties: [],
-        role: 'Buyer',
+        userStates: ['Default'],
         onboardingCompleted: false,
         phoneVerified: false,
         preferences: DEFAULT_PREFERENCES,
@@ -730,6 +762,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const deleteListing = async (id: string): Promise<void> => {
+    try {
+      const now = new Date().toISOString();
+      const docRef = doc(db, 'listingRequests', id);
+      await updateDoc(docRef, {
+        status: 'Archived' as ListingStatus,
+        archiveReason: 'Deleted' as const,
+        archivedAt: now,
+        lastUpdated: now
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `listingRequests/${id}`);
+    }
+  };
+
   const promoteDraftToListing = async (draftId: string): Promise<void> => {
     try {
       const docRef = doc(db, 'drafts', draftId);
@@ -763,18 +810,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         listingTitle = data?.title || listingTitle;
       }
 
-      if (updates.agentBids) {
-        const hasSelfBid = updates.agentBids.some(bid => bid.agentId === listingOwnerId);
+      const mergedUpdates = { ...updates };
+      if (mergedUpdates.status === 'Rejected') {
+        mergedUpdates.archiveReason = 'Rejected';
+        (mergedUpdates as any).archivedAt = new Date().toISOString();
+      } else if ((mergedUpdates.status as any) === 'Closed' || (mergedUpdates.status as any) === 'Completed' || mergedUpdates.dealStatus === 'Closed') {
+        mergedUpdates.archiveReason = 'Sold';
+        (mergedUpdates as any).archivedAt = new Date().toISOString();
+      }
+
+      if (mergedUpdates.agentBids) {
+        const hasSelfBid = mergedUpdates.agentBids.some(bid => bid.agentId === listingOwnerId);
         if (hasSelfBid) {
           throw new Error("Conflict of interest — you cannot place a bid on your own property listing.");
         }
       }
 
-      await updateDoc(docRef, updates);
+      await updateDoc(docRef, mergedUpdates);
 
-      if (updates.status === 'Approved') {
+      if (mergedUpdates.status === 'Approved') {
         if (snap.exists()) {
-          const listingRequest = { id: snap.id, ...snap.data(), ...updates } as ListingRequest;
+          const listingRequest = { id: snap.id, ...snap.data(), ...mergedUpdates } as ListingRequest;
           await promoteToProperty(listingRequest);
         }
         if (listingOwnerId) {
@@ -785,7 +841,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             data: { listingId: id }
           });
         }
-      } else if (updates.status === 'Rejected' && listingOwnerId) {
+      } else if (mergedUpdates.status === 'Rejected' && listingOwnerId) {
         sendNotification(listingOwnerId, {
           type: 'listing_rejected',
           title: 'Listing Rejected',
@@ -808,6 +864,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${user.id}`);
     }
+  };
+
+  const addUserState = async (state: UserState): Promise<void> => {
+    if (!auth.currentUser) return;
+    try {
+      const userDocRef = doc(db, 'users', auth.currentUser.uid);
+      await updateDoc(userDocRef, {
+        userStates: arrayUnion(state)
+      });
+    } catch (err: any) {
+      console.error("Error adding user state:", err);
+      handleFirestoreError(err, OperationType.UPDATE, `users/${auth.currentUser.uid}`);
+    }
+  };
+
+  const removeUserState = async (state: UserState): Promise<void> => {
+    if (!auth.currentUser) return;
+    try {
+      const userDocRef = doc(db, 'users', auth.currentUser.uid);
+      await updateDoc(userDocRef, {
+        userStates: arrayRemove(state)
+      });
+    } catch (err: any) {
+      console.error("Error removing user state:", err);
+      handleFirestoreError(err, OperationType.UPDATE, `users/${auth.currentUser.uid}`);
+    }
+  };
+
+  const hasState = (state: UserState): boolean => {
+    return user?.userStates?.includes(state) ?? false;
   };
 
   const updateTokens = async (delta: number) => {
@@ -864,7 +950,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const loadMorePlatformListings = async (): Promise<void> => {
-    if (!user || (user.role !== 'Agent' && user.role !== 'Admin')) return;
+    if (!user || (!user.userStates?.includes('Agent') && !user.userStates?.includes('Admin'))) return;
     if (!platformListingsLastDoc) return;
     try {
       const q = query(
@@ -890,7 +976,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const loadMoreListingRequests = async (): Promise<void> => {
     if (!user || !listingRequestsLastDoc) return;
-    if (user.role !== 'Agent' && user.role !== 'Admin') return;
+    if (!user.userStates?.includes('Agent') && !user.userStates?.includes('Admin')) return;
     try {
       const q = query(
         collection(db, 'listingRequests'),
@@ -931,8 +1017,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <AuthContext.Provider value={{ 
       user, firebaseUser, loading, error, listingRequests, platformListings, savedProperties,
       signInWithGoogle, signInWithFacebook, signInWithEmail, signUpWithEmail, signInWithGoogleMock, signInWithFacebookMock, logout,
-      toggleSavedProperty, addListingRequest, updateListingRequest, updateUser, updateUserEmail, updateTokens, addTransaction, updateAgentTrustScore,
-      drafts, saveDraft, updateDraft, deleteDraft, promoteDraftToListing,
+      toggleSavedProperty, addListingRequest, updateListingRequest, updateUser, updateUserEmail, addUserState, removeUserState, hasState, updateTokens, addTransaction, updateAgentTrustScore,
+      drafts, saveDraft, updateDraft, deleteDraft, deleteListing, promoteDraftToListing,
       loadMorePlatformListings, loadMoreListingRequests
     }}>
       {children}

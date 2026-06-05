@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { useAuth } from "../context/AuthContext";
+import { hasState } from "../lib/utils";
 import { useNavigation } from "../context/NavigationContext";
 import { sendNotification } from "../lib/notifications";
 import {
@@ -197,7 +198,7 @@ export default function AgentBidding({ onViewLeaderboard }: { onViewLeaderboard?
           });
         });
 
-        if (user.role === 'Agent' && !agentsList.some(a => a.id === user.id)) {
+        if (hasState(user, 'Agent') && !agentsList.some(a => a.id === user.id)) {
           agentsList.push({
             id: user.id,
             name: user.name,
@@ -267,8 +268,8 @@ export default function AgentBidding({ onViewLeaderboard }: { onViewLeaderboard?
   };
 
   // Check user role
-  const isAgent = user?.role === "Agent";
-  const isSeller = user?.role === "Seller";
+  const isAgent = hasState(user, "Agent");
+  const isSeller = hasState(user, "Seller");
 
   // ----------------- AGENT VIEW -----------------
   if (isAgent) {

@@ -48,7 +48,8 @@ export default function SignupFlow({ onCancel }: SignupFlowProps) {
     setPhone('');
     setUsername('');
     setPassword('');
-    setFullName('');
+    setFirstName('');
+    setSurname('');
     setEmail('');
     setIsPhoneUnique(null);
     setIsUsernameUnique(null);
@@ -70,7 +71,8 @@ export default function SignupFlow({ onCancel }: SignupFlowProps) {
   );
 
   // STEP 3 - Additional profile details states
-  const [fullName, setFullName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [surname, setSurname] = useState('');
   const [email, setEmail] = useState('');
   const [isUniqueEmailLoading, setIsUniqueEmailLoading] = useState(false);
   const [isEmailUnique, setIsEmailUnique] = useState<boolean | null>(null);
@@ -345,7 +347,7 @@ export default function SignupFlow({ onCancel }: SignupFlowProps) {
 
   // Complete multi-step sign up
   const handleStep3Submit = async () => {
-    if (!fullName || !email) {
+    if (!firstName || !surname || !email) {
       setError('Please provide all required profile details.');
       return;
     }
@@ -366,34 +368,32 @@ export default function SignupFlow({ onCancel }: SignupFlowProps) {
       const fUser = userCreds.user;
 
       // 2. Update Auth display name
-      await updateProfile(fUser, { displayName: fullName });
+      const combinedFullName = `${firstName.trim()} ${surname.trim()}`.trim();
+      await updateProfile(fUser, { displayName: combinedFullName });
 
       // 3. Create Firestore record
       const formattedPhone = `+234${phone}`;
-      const nameParts = fullName.trim().split(/\s+/);
-      const firstName = nameParts[0] || '';
-      const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
 
       const newUserDoc = {
         id: fUser.uid,
-        name: fullName,
-        firstName,
-        lastName,
+        name: combinedFullName,
+        firstName: firstName.trim(),
+        lastName: surname.trim(),
         username: username.trim().toLowerCase(),
         email: email.trim().toLowerCase(),
         phoneNumber: formattedPhone,
-        isAgent: selectedRole === 'Agent',
         isSubscriber: false,
-        kycStatus: selectedRole === 'Agent' ? 'Pending' : 'None',
+        kycStatus: 'None',
         kycDocuments: [],
         profileScore: 20,
         tokens: 100,
         savedProperties: [],
-        role: selectedRole,
+        userStates: ['Default'],
         gender,
         ageVerified: true,
-        onboardingCompleted: true,
+        onboardingCompleted: false,
         phoneVerified: true,
+        phoneVerifiedAt: new Date().toISOString(),
         profileComplete: true,
         welcomeToastShown: false,
         preferences: DEFAULT_PREFERENCES,
@@ -677,20 +677,39 @@ export default function SignupFlow({ onCancel }: SignupFlowProps) {
             </div>
 
             <div className="space-y-3">
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-brand-black dark:text-zinc-300 uppercase tracking-widest block">
-                  Full Name
-                </label>
-                <div className="relative">
-                  <User className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-550" size={18} />
-                  <input
-                    type="text"
-                    required
-                    placeholder="Musa Aminu"
-                    value={fullName}
-                    onChange={(e) => { setFullName(e.target.value); setError(null); }}
-                    className="w-full !pl-10 pr-4 py-3 bg-white dark:bg-zinc-800 border-2 border-brand-black text-brand-black dark:text-white font-medium text-sm focus:outline-none transition-all"
-                  />
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-brand-black dark:text-zinc-300 uppercase tracking-widest block">
+                    Surname <span className="text-brand-red font-black">*</span>
+                  </label>
+                  <div className="relative">
+                    <User className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-550" size={18} />
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Aminu"
+                      value={surname}
+                      onChange={(e) => { setSurname(e.target.value); setError(null); }}
+                      className="w-full !pl-10 pr-4 py-3 bg-white dark:bg-zinc-800 border-2 border-brand-black text-brand-black dark:text-white font-medium text-sm focus:outline-none transition-all"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-brand-black dark:text-zinc-300 uppercase tracking-widest block">
+                    First Name <span className="text-brand-red font-black">*</span>
+                  </label>
+                  <div className="relative">
+                    <User className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-550" size={18} />
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Musa"
+                      value={firstName}
+                      onChange={(e) => { setFirstName(e.target.value); setError(null); }}
+                      className="w-full !pl-10 pr-4 py-3 bg-white dark:bg-zinc-800 border-2 border-brand-black text-brand-black dark:text-white font-medium text-sm focus:outline-none transition-all"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -799,7 +818,7 @@ export default function SignupFlow({ onCancel }: SignupFlowProps) {
               <button
                 id="signup-confirm-btn"
                 type="button"
-                disabled={!fullName || !email || isEmailUnique !== true || !isAgeVerified || loading}
+                disabled={!firstName || !surname || !email || isEmailUnique !== true || !isAgeVerified || loading}
                 onClick={handleStep3Submit}
                 className="brutalist-button-teal w-full py-4 flex items-center justify-center gap-2 font-black tracking-widest mt-4 uppercase text-sm"
               >
